@@ -23,7 +23,14 @@ import (
 )
 
 type Server struct {
-	Layer *layers.Layer
+	Layer          *layers.Layer
+	Config         *config.Config
+	ReadFunc       func([]byte) (int, error)
+	ReadCallback   func(int)
+	WriteFunc      func([]byte) int
+	WriteCallback  func(int)
+	WriteToTunFunc func(buf []byte) (int, error)
+	CTX            context.Context
 }
 
 func New(layer *layers.Layer) *Server {
@@ -33,13 +40,13 @@ func New(layer *layers.Layer) *Server {
 }
 
 // StartServerForApi starts the ws server
-func (x *Server) StartServerForApi(config *config.Config, readFunc func([]byte) (int, error), readCallback func(int), writeFunc func([]byte) int, writeCallback func(int), _ctx context.Context) {
+func (x *Server) StartServerForApi() {
 	// server -> client
-	go x.toClient(config, readFunc, readCallback, _ctx)
+	go x.toClient()
 	// client -> server
 	srv := http.NewServeMux()
-	srv.HandleFunc(config.VTun.Path, func(w http.ResponseWriter, r *http.Request) {
-		if !x.checkPermission(w, r, config) {
+	srv.HandleFunc(x.Config.VTun.Path, func(w http.ResponseWriter, r *http.Request) {
+		if !x.checkPermission(w, r) {
 			logger.Logger.Error("[server] authentication failed")
 			return
 		}
@@ -48,7 +55,7 @@ func (x *Server) StartServerForApi(config *config.Config, readFunc func([]byte) 
 			logger.Logger.Error("[server] failed to upgrade http", zap.Error(err))
 			return
 		}
-		x.toServer(config, conn, writeFunc, writeCallback, _ctx)
+		x.toServer(conn)
 	})
 
 	srv.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
@@ -62,14 +69,14 @@ func (x *Server) StartServerForApi(config *config.Config, readFunc func([]byte) 
 		w.Write([]byte(`follow`))
 	})
 
-	log.Printf("vtun websocket server started on %v", config.VTun.LocalAddr)
-	if config.VTun.Protocol == "wss" && config.VTun.TLSCertificateFilePath != "" && config.VTun.TLSCertificateKeyFilePath != "" {
-		err := http.ListenAndServeTLS(config.VTun.LocalAddr, config.VTun.TLSCertificateFilePath, config.VTun.TLSCertificateKeyFilePath, srv)
+	log.Printf("gofly ws server started on %v", x.Config.VTun.LocalAddr)
+	if x.Config.VTun.Protocol == "wss" && x.Config.VTun.TLSCertificateFilePath != "" && x.Config.VTun.TLSCertificateKeyFilePath != "" {
+		err := http.ListenAndServeTLS(x.Config.VTun.LocalAddr, x.Config.VTun.TLSCertificateFilePath, x.Config.VTun.TLSCertificateKeyFilePath, srv)
 		if err != nil {
 			logger.Logger.Fatal("http listen Error", zap.Error(err))
 		}
 	} else {
-		err := http.ListenAndServe(config.VTun.LocalAddr, srv)
+		err := http.ListenAndServe(x.Config.VTun.LocalAddr, srv)
 		if err != nil {
 			logger.Logger.Fatal("http listen Error", zap.Error(err))
 		}
@@ -77,12 +84,12 @@ func (x *Server) StartServerForApi(config *config.Config, readFunc func([]byte) 
 }
 
 // checkPermission checks the permission of the request
-func (x *Server) checkPermission(w http.ResponseWriter, req *http.Request, config *config.Config) bool {
-	if config.VTun.Key == "" {
+func (x *Server) checkPermission(w http.ResponseWriter, req *http.Request) bool {
+	if x.Config.VTun.Key == "" {
 		return true
 	}
 	key := req.Header.Get("key")
-	if key != config.VTun.Key {
+	if key != x.Config.VTun.Key {
 		w.WriteHeader(http.StatusForbidden)
 		w.Write([]byte("No permission"))
 		return false
@@ -90,11 +97,11 @@ func (x *Server) checkPermission(w http.ResponseWriter, req *http.Request, confi
 	return true
 }
 
-// toClient sends data to client
-func (x *Server) toClient(config *config.Config, readFunc func([]byte) (int, error), callback func(int), _ctx context.Context) {
-	packet := make([]byte, config.VTun.BufferSize)
-	for contextOpened(_ctx) {
-		n, err := readFunc(packet)
+// toClient WireGuard to GateWay - ReadFunc
+func (x *Server) toClient() {
+	packet := make([]byte, x.Config.VTun.BufferSize)
+	for contextOpened(x.CTX) {
+		n, err := x.ReadFunc(packet)
 		if err != nil {
 			logger.Logger.Error("getData Error", zap.Error(err))
 			break
@@ -106,10 +113,10 @@ func (x *Server) toClient(config *config.Config, readFunc func([]byte) (int, err
 		x.convertDstAddr(b)
 		if key := netutil.GetDstKey(b); key != "" {
 			if v, ok := cache.GetCache().Get(key); ok {
-				if config.VTun.Obfs {
+				if x.Config.VTun.Obfs {
 					b = cipher.XOR(b)
 				}
-				if config.VTun.Compress {
+				if x.Config.VTun.Compress {
 					b = snappy.Encode(nil, b)
 				}
 				err := wsutil.WriteServerBinary(v.(net.Conn), b)
@@ -117,18 +124,18 @@ func (x *Server) toClient(config *config.Config, readFunc func([]byte) (int, err
 					cache.GetCache().Delete(key)
 					continue
 				}
-				callback(n)
+				x.ReadCallback(n)
 			}
 		}
 	}
 }
 
 func (x *Server) convertDstAddr(packet []byte) {
+	if ok, _ := x.Layer.IsLocalSrcPacket(packet); ok {
+		return
+	}
 	version := packet[0] >> 4
 	if version == 4 {
-		//if layers.IsPrivate(packet[12:16]) {
-		//	return
-		//}
 		p := ipv4.GetProtocol(packet)
 		if p == "tcp" {
 			dstAddr := ipv4.ParseDstTcp(packet)
@@ -167,11 +174,16 @@ func (x *Server) convertDstAddr(packet []byte) {
 }
 
 func (x *Server) convertSrcAddr(packet []byte) {
+	if ok, _ := x.Layer.IsLocalDstPacket(packet); ok {
+		_, err := x.WriteToTunFunc(packet)
+		if err != nil {
+			logger.Logger.Sugar().Errorf("write to tun error, %v\n", zap.Error(err))
+			return
+		}
+		return
+	}
 	version := packet[0] >> 4
 	if version == 4 {
-		//if layers.IsPrivate(packet[16:20]) {
-		//	return
-		//}
 		p := ipv4.GetProtocol(packet)
 		if p == "tcp" {
 			srcAddr := ipv4.ParseSrcTcp(packet)
@@ -210,9 +222,9 @@ func (x *Server) convertSrcAddr(packet []byte) {
 }
 
 // toServer sends data to server
-func (x *Server) toServer(config *config.Config, conn net.Conn, writeFunc func([]byte) int, callback func(int), _ctx context.Context) {
+func (x *Server) toServer(conn net.Conn) {
 	defer conn.Close()
-	for contextOpened(_ctx) {
+	for contextOpened(x.CTX) {
 		b, op, err := wsutil.ReadClientData(conn)
 		if err != nil {
 			logger.Logger.Error("ReadClientData Error", zap.Error(err))
@@ -225,17 +237,17 @@ func (x *Server) toServer(config *config.Config, conn net.Conn, writeFunc func([
 				return
 			}
 		} else if op == ws.OpBinary {
-			if config.VTun.Compress {
+			if x.Config.VTun.Compress {
 				b, _ = snappy.Decode(nil, b)
 			}
-			if config.VTun.Obfs {
+			if x.Config.VTun.Obfs {
 				b = cipher.XOR(b)
 			}
 			if key := netutil.GetSrcKey(b); key != "" {
 				cache.GetCache().Set(key, conn, 24*time.Hour)
 				x.convertSrcAddr(b)
-				callback(len(b))
-				writeFunc(b)
+				x.WriteCallback(len(b))
+				x.WriteFunc(b)
 			}
 		}
 	}

@@ -51,9 +51,10 @@ type WGPeer struct {
 }
 
 func (config *Config) setDefault() {
-	for _, peer := range config.Wg.Peers {
+	for i, peer := range config.Wg.Peers {
 		if len(peer.AllowedIPs) == 0 {
-			peer.AllowedIPs = append(peer.AllowedIPs, "0.0.0.0/0", "::/0")
+			config.Wg.Peers[i].AllowedIPs = append(config.Wg.Peers[i].AllowedIPs, "0.0.0.0/0", "::/0")
+			break
 		}
 	}
 }

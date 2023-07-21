@@ -15,6 +15,7 @@ import (
 	ct "gofly/pkg/tun"
 	"gofly/pkg/utils"
 	tun2 "golang.zx2c4.com/wireguard/tun"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -29,8 +30,8 @@ import (
 
 var _ctx context.Context
 var cancel context.CancelFunc
-var tun tun2.Device
-var tnet *ct.Net
+var ti tun2.Device
+var tNet *ct.Net
 var layer *layers.Layer
 
 func parseAddr(address []string) []netip.Addr {
@@ -57,9 +58,10 @@ func StartServer(config *config.Config) {
 		V4Layer: ipv4.New(ipv4Addr),
 		V6Layer: ipv6.New(ipv6Addr),
 	}
+	layer.LoadAddress(config.Wg.Address)
 	ct.Init(_ctx)
 	var err error
-	tun, tnet, err = ct.CreateNetTUN(
+	ti, tNet, err = ct.CreateNetTUN(
 		parseAddr(config.Wg.Address),
 		parseAddr(config.Wg.DNS),
 		config.Wg.MTU,
@@ -67,7 +69,7 @@ func StartServer(config *config.Config) {
 	if err != nil {
 		log.Panic(err)
 	}
-	dev := device.NewDevice(tun, conn.NewDefaultBind(), device.NewLogger(device.LogLevelSilent, ""))
+	dev := device.NewDevice(ti, conn.NewDefaultBind(), device.NewLogger(device.LogLevelVerbose, ""))
 	ClientConfig := createIPCRequest(config)
 	err = dev.IpcSet(ClientConfig)
 	if err != nil {
@@ -77,29 +79,68 @@ func StartServer(config *config.Config) {
 	if err != nil {
 		log.Panic(err)
 	}
+	go ReadTunSync(config)
+	go RunHttpClient()
 	go RunLocalHttpServer()
-	server := ws.New(layer)
+	server := &ws.Server{
+		Layer:          layer,
+		Config:         config,
+		ReadFunc:       ReadFromWireGuard,
+		ReadCallback:   func(i int) {},
+		WriteFunc:      WriteToWireGuard,
+		WriteCallback:  func(i int) {},
+		WriteToTunFunc: WriteToTun,
+		CTX:            _ctx,
+	}
 	//websocket server
-	server.StartServerForApi(
-		config,
-		func(bts []byte) (int, error) {
-			a := <-tnet.WaitRecvCh.Out
-			n := len(a)
-			copy(bts[:n], a)
-			return n, nil
-		},
-		func(i int) {},
-		func(bts []byte) int {
-			n := len(bts)
-			tnet.WaitSendCh.In <- bts
-			return n
-		},
-		func(i int) {},
-		_ctx)
+	server.StartServerForApi()
+}
+
+func ReadTunSync(config *config.Config) {
+	buffer := make([]byte, config.VTun.BufferSize)
+	for contextOpened(_ctx) {
+		n, err := ReadFromTun(buffer)
+		if err != nil {
+			logger.Logger.Sugar().Errorf("ReadFromTun error %v\n", zap.Error(err))
+		}
+		b := make([]byte, n)
+		copy(b, buffer[:n])
+		tNet.WaitRecvCh.In <- b
+	}
+}
+
+func contextOpened(_ctx context.Context) bool {
+	select {
+	case <-_ctx.Done():
+		return false
+	default:
+		return true
+	}
+}
+
+func ReadFromWireGuard(bts []byte) (int, error) {
+	a := <-tNet.WaitRecvCh.Out
+	n := len(a)
+	copy(bts[:n], a)
+	return n, nil
+}
+
+func WriteToWireGuard(bts []byte) int {
+	n := len(bts)
+	tNet.WaitSendCh.In <- bts
+	return n
+}
+
+func ReadFromTun(buf []byte) (int, error) {
+	return ti.(*ct.NetTun).ReadFromTun(buf, 0)
+}
+
+func WriteToTun(buf []byte) (int, error) {
+	return ti.(*ct.NetTun).WriteToTun(buf, 0)
 }
 
 func RunLocalHttpServer() {
-	listener, err := tnet.ListenTCP(&net.TCPAddr{Port: 80})
+	listener, err := tNet.ListenTCP(&net.TCPAddr{Port: 80})
 	if err != nil {
 		log.Panicln(err)
 	}
@@ -123,6 +164,23 @@ func RunLocalHttpServer() {
 	if err != nil {
 		log.Panicln(err)
 	}
+}
+
+func RunHttpClient() {
+	client := http.Client{
+		Transport: &http.Transport{
+			DialContext: tNet.DialContext,
+		},
+	}
+	resp, err := client.Get("http://172.16.222.1/")
+	if err != nil {
+		log.Panic(err)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Panic(err)
+	}
+	log.Println(string(body))
 }
 
 func Close() {

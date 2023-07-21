@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"golang.zx2c4.com/wireguard/tun"
@@ -34,7 +35,7 @@ import (
 	"gvisor.dev/gvisor/pkg/waiter"
 )
 
-type netTun struct {
+type NetTun struct {
 	ep             *channel.Endpoint
 	stack          *stack.Stack
 	events         chan tun.Event
@@ -46,7 +47,7 @@ type netTun struct {
 	WaitRecvCh     *xchan.UnboundedChan[[]byte]
 }
 
-type Net netTun
+type Net NetTun
 
 var _ctx context.Context
 
@@ -60,7 +61,7 @@ func CreateNetTUN(localAddresses, dnsServers []netip.Addr, mtu int) (tun.Device,
 		TransportProtocols: []stack.TransportProtocolFactory{tcp.NewProtocol, udp.NewProtocol, icmp.NewProtocol6, icmp.NewProtocol4},
 		HandleLocal:        true,
 	}
-	dev := &netTun{
+	dev := &NetTun{
 		ep:             channel.New(1024, uint32(mtu), ""),
 		stack:          stack.New(opts),
 		events:         make(chan tun.Event, 10),
@@ -112,19 +113,20 @@ func CreateNetTUN(localAddresses, dnsServers []netip.Addr, mtu int) (tun.Device,
 	return dev, (*Net)(dev), nil
 }
 
-func (tun *netTun) Name() (string, error) {
+func (tun *NetTun) Name() (string, error) {
 	return "go", nil
 }
 
-func (tun *netTun) File() *os.File {
+func (tun *NetTun) File() *os.File {
 	return nil
 }
 
-func (tun *netTun) Events() <-chan tun.Event {
+func (tun *NetTun) Events() <-chan tun.Event {
 	return tun.events
 }
 
-func (tun *netTun) Read(buf [][]byte, sizes []int, offset int) (int, error) {
+// Read from WireGuard
+func (tun *NetTun) Read(buf [][]byte, sizes []int, offset int) (int, error) {
 	bts, ok := <-tun.WaitSendCh.Out
 	if !ok {
 		return 0, os.ErrClosed
@@ -137,7 +139,8 @@ func (tun *netTun) Read(buf [][]byte, sizes []int, offset int) (int, error) {
 	return 1, nil
 }
 
-func (tun *netTun) Write(buf [][]byte, offset int) (int, error) {
+// Write to WireGuard
+func (tun *NetTun) Write(buf [][]byte, offset int) (int, error) {
 	for _, buf := range buf {
 		packet := buf[offset:]
 		if len(packet) == 0 {
@@ -151,7 +154,39 @@ func (tun *netTun) Write(buf [][]byte, offset int) (int, error) {
 	return len(buf), nil
 }
 
-func (tun *netTun) WriteNotify() {
+// ReadFromTun read from Virtual Tun
+func (tun *NetTun) ReadFromTun(buf []byte, offset int) (int, error) {
+	view, ok := <-tun.incomingPacket
+	if !ok {
+		return 0, os.ErrClosed
+	}
+
+	n, err := view.Read(buf[offset:])
+	if err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+// WriteToTun write to Virtual Tun
+func (tun *NetTun) WriteToTun(buf []byte, offset int) (int, error) {
+	packet := buf[offset:]
+	if len(packet) == 0 {
+		return 0, nil
+	}
+	pkb := stack.NewPacketBuffer(stack.PacketBufferOptions{Payload: bufferv2.MakeWithData(packet)})
+	switch packet[0] >> 4 {
+	case 4:
+		tun.ep.InjectInbound(header.IPv4ProtocolNumber, pkb)
+	case 6:
+		tun.ep.InjectInbound(header.IPv6ProtocolNumber, pkb)
+	default:
+		return 0, syscall.EAFNOSUPPORT
+	}
+	return len(buf), nil
+}
+
+func (tun *NetTun) WriteNotify() {
 	pkt := tun.ep.Read()
 	if pkt.IsNil() {
 		return
@@ -163,7 +198,7 @@ func (tun *netTun) WriteNotify() {
 	tun.incomingPacket <- view
 }
 
-func (tun *netTun) Close() error {
+func (tun *NetTun) Close() error {
 	tun.stack.RemoveNIC(1)
 
 	if tun.events != nil {
@@ -179,11 +214,11 @@ func (tun *netTun) Close() error {
 	return nil
 }
 
-func (tun *netTun) MTU() (int, error) {
+func (tun *NetTun) MTU() (int, error) {
 	return tun.mtu, nil
 }
 
-func (tun *netTun) BatchSize() int {
+func (tun *NetTun) BatchSize() int {
 	return 1
 }
 
