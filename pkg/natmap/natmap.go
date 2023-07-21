@@ -186,6 +186,8 @@ func (x *NatMap) CreateCheckIcmp(srcAddr *ICMPPair, dstAddr *ICMPPair) *ICMPPair
 	reverseAddr := x.ReserveIcmp(srcAddr)
 	if reverseAddr == nil {
 		reverseAddr = x.CreateIcmp(srcAddr, dstAddr)
+	} else {
+		x.AppendIcmp(srcAddr, reverseAddr)
 	}
 	return reverseAddr
 }
@@ -198,6 +200,8 @@ func (x *NatMap) CreateCheckTcp(srcAddr *net.TCPAddr, ip net.IP, dstMode bool) *
 	reverseAddr := x.ReserveTcp(srcAddr)
 	if reverseAddr == nil {
 		reverseAddr = x.CreateTcp(srcAddr, ip)
+	} else {
+		x.AppendTcp(srcAddr, reverseAddr)
 	}
 	return reverseAddr
 }
@@ -210,6 +214,8 @@ func (x *NatMap) CreateCheckUdp(srcAddr *net.UDPAddr, ip net.IP, dstMode bool) *
 	reverseAddr := x.ReserveUdp(srcAddr)
 	if reverseAddr == nil {
 		reverseAddr = x.CreateUdp(srcAddr, ip)
+	} else {
+		x.AppendUdp(srcAddr, reverseAddr)
 	}
 	return reverseAddr
 }

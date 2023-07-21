@@ -69,7 +69,7 @@ func StartServer(config *config.Config) {
 	if err != nil {
 		log.Panic(err)
 	}
-	dev := device.NewDevice(ti, conn.NewDefaultBind(), device.NewLogger(device.LogLevelVerbose, ""))
+	dev := device.NewDevice(ti, conn.NewDefaultBind(), device.NewLogger(device.LogLevelSilent, ""))
 	ClientConfig := createIPCRequest(config)
 	err = dev.IpcSet(ClientConfig)
 	if err != nil {
@@ -261,7 +261,7 @@ func IsDomainName(s string) bool {
 	}
 	last := byte('.')
 	nonNumeric := false
-	partlen := 0
+	partLen := 0
 	for i := 0; i < len(s); i++ {
 		c := s[i]
 		switch {
@@ -269,27 +269,27 @@ func IsDomainName(s string) bool {
 			return false
 		case 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || c == '_':
 			nonNumeric = true
-			partlen++
+			partLen++
 		case '0' <= c && c <= '9':
-			partlen++
+			partLen++
 		case c == '-':
 			if last == '.' {
 				return false
 			}
-			partlen++
+			partLen++
 			nonNumeric = true
 		case c == '.':
 			if last == '.' || last == '-' {
 				return false
 			}
-			if partlen > 63 || partlen == 0 {
+			if partLen > 63 || partLen == 0 {
 				return false
 			}
-			partlen = 0
+			partLen = 0
 		}
 		last = c
 	}
-	if last == '-' || partlen > 63 {
+	if last == '-' || partLen > 63 {
 		return false
 	}
 	return nonNumeric
