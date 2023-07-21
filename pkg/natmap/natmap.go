@@ -2,31 +2,81 @@ package natmap
 
 import (
 	"fmt"
+	"github.com/patrickmn/go-cache"
 	"net"
+	"time"
 )
 
 type NatMap struct {
 	_tcpPort    int
 	_udpPort    int
-	_cacheTcpP  map[string]*net.TCPAddr
-	_cacheTcpN  map[string]*net.TCPAddr
-	_cacheUdpP  map[string]*net.UDPAddr
-	_cacheUdpN  map[string]*net.UDPAddr
-	_cacheICMPP map[string]*ICMPPair // client ip:tag1 => dst ip:tag2
-	_cacheICMPN map[string]*ICMPPair // dst ip:tag2 => client ip:tag1
+	_cacheTcpP  *cache.Cache //key: string, value: *net.TCPAddr
+	_cacheTcpN  *cache.Cache //key: string, value: *net.TCPAddr
+	_cacheUdpP  *cache.Cache //key: string, value: *net.UDPAddr
+	_cacheUdpN  *cache.Cache //key: string, value: *net.UDPAddr
+	_cacheICMPP *cache.Cache //key: string, value: *ICMPPair // client ip:tag1 => dst ip:tag2
+	_cacheICMPN *cache.Cache //key: string, value: *ICMPPair // dst ip:tag2 => client ip:tag1
 }
 
 func New() *NatMap {
 	return &NatMap{
 		_tcpPort:    1024,
 		_udpPort:    1024,
-		_cacheTcpP:  make(map[string]*net.TCPAddr, 65535),
-		_cacheTcpN:  make(map[string]*net.TCPAddr, 65535),
-		_cacheUdpP:  make(map[string]*net.UDPAddr, 65535),
-		_cacheUdpN:  make(map[string]*net.UDPAddr, 65535),
-		_cacheICMPP: make(map[string]*ICMPPair, 65535), // client ip:tag1 => dst ip:tag2
-		_cacheICMPN: make(map[string]*ICMPPair, 65535), // dst ip:tag2 => client ip:tag1
+		_cacheTcpP:  cache.New(1*time.Minute, 15*time.Minute),
+		_cacheTcpN:  cache.New(1*time.Minute, 15*time.Minute),
+		_cacheUdpP:  cache.New(1*time.Minute, 15*time.Minute),
+		_cacheUdpN:  cache.New(1*time.Minute, 15*time.Minute),
+		_cacheICMPP: cache.New(1*time.Minute, 15*time.Minute), // client ip:tag1 => dst ip:tag2
+		_cacheICMPN: cache.New(1*time.Minute, 15*time.Minute), // dst ip:tag2 => client ip:tag1
 	}
+}
+
+func (x *NatMap) SearchTcpP(key string) (*net.TCPAddr, bool) {
+	v, ok := x._cacheTcpP.Get(key)
+	if ok {
+		return v.(*net.TCPAddr), true
+	}
+	return nil, false
+}
+
+func (x *NatMap) SearchTcpN(key string) (*net.TCPAddr, bool) {
+	v, ok := x._cacheTcpN.Get(key)
+	if ok {
+		return v.(*net.TCPAddr), true
+	}
+	return nil, false
+}
+
+func (x *NatMap) SearchUdpP(key string) (*net.UDPAddr, bool) {
+	v, ok := x._cacheUdpP.Get(key)
+	if ok {
+		return v.(*net.UDPAddr), true
+	}
+	return nil, false
+}
+
+func (x *NatMap) SearchUdpN(key string) (*net.UDPAddr, bool) {
+	v, ok := x._cacheUdpN.Get(key)
+	if ok {
+		return v.(*net.UDPAddr), true
+	}
+	return nil, false
+}
+
+func (x *NatMap) SearchIcmpP(key string) (*ICMPPair, bool) {
+	v, ok := x._cacheICMPP.Get(key)
+	if ok {
+		return v.(*ICMPPair), true
+	}
+	return nil, false
+}
+
+func (x *NatMap) SearchIcmpN(key string) (*ICMPPair, bool) {
+	v, ok := x._cacheICMPN.Get(key)
+	if ok {
+		return v.(*ICMPPair), true
+	}
+	return nil, false
 }
 
 type ICMPPair struct {
@@ -40,33 +90,33 @@ func (i *ICMPPair) String() string {
 
 func (x *NatMap) ReserveIcmp(it *ICMPPair) *ICMPPair {
 	var key = it.String()
-	if _, ok := x._cacheICMPP[key]; ok {
-		return x._cacheICMPP[key]
+	if v, ok := x.SearchIcmpP(key); ok {
+		return v
 	}
-	if _, ok := x._cacheICMPN[key]; ok {
-		return x._cacheICMPN[key]
+	if v, ok := x.SearchIcmpN(key); ok {
+		return v
 	}
 	return nil
 }
 
 func (x *NatMap) ReserveTcp(addr *net.TCPAddr) *net.TCPAddr {
 	var key = addr.String()
-	if _, ok := x._cacheTcpP[key]; ok {
-		return x._cacheTcpP[key]
+	if v, ok := x.SearchTcpP(key); ok {
+		return v
 	}
-	if _, ok := x._cacheTcpN[key]; ok {
-		return x._cacheTcpN[key]
+	if v, ok := x.SearchTcpN(key); ok {
+		return v
 	}
 	return nil
 }
 
 func (x *NatMap) ReserveUdp(addr *net.UDPAddr) *net.UDPAddr {
 	var key = addr.String()
-	if _, ok := x._cacheUdpP[key]; ok {
-		return x._cacheUdpP[key]
+	if v, ok := x.SearchUdpP(key); ok {
+		return v
 	}
-	if _, ok := x._cacheUdpN[key]; ok {
-		return x._cacheUdpN[key]
+	if v, ok := x.SearchUdpN(key); ok {
+		return v
 	}
 	return nil
 }
@@ -74,22 +124,22 @@ func (x *NatMap) ReserveUdp(addr *net.UDPAddr) *net.UDPAddr {
 func (x *NatMap) AppendIcmp(srcAddr *ICMPPair, dstAddr *ICMPPair) {
 	var keyP = srcAddr.String()
 	var keyN = dstAddr.String()
-	x._cacheICMPP[keyP] = dstAddr
-	x._cacheICMPN[keyN] = srcAddr
+	x._cacheICMPP.Set(keyP, dstAddr, cache.DefaultExpiration)
+	x._cacheICMPN.Set(keyN, srcAddr, cache.DefaultExpiration)
 }
 
 func (x *NatMap) AppendTcp(srcAddr *net.TCPAddr, dstAddr *net.TCPAddr) {
 	var keyP = srcAddr.String()
 	var keyN = dstAddr.String()
-	x._cacheTcpP[keyP] = dstAddr
-	x._cacheTcpN[keyN] = srcAddr
+	x._cacheTcpP.Set(keyP, dstAddr, cache.DefaultExpiration)
+	x._cacheTcpN.Set(keyN, srcAddr, cache.DefaultExpiration)
 }
 
 func (x *NatMap) AppendUdp(srcAddr *net.UDPAddr, dstAddr *net.UDPAddr) {
 	var keyP = srcAddr.String()
 	var keyN = dstAddr.String()
-	x._cacheUdpP[keyP] = dstAddr
-	x._cacheUdpN[keyN] = srcAddr
+	x._cacheUdpP.Set(keyP, dstAddr, cache.DefaultExpiration)
+	x._cacheUdpN.Set(keyN, srcAddr, cache.DefaultExpiration)
 }
 
 func NewIcmp(ip net.IP, tag int) *ICMPPair {

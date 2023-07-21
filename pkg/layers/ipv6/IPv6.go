@@ -250,14 +250,34 @@ func CalcTCPCheckSum(packet []byte) {
 }
 
 func CalcICMPCheckSum(packet []byte) {
-	result := 0
-	packet[HeaderLength+2] = 0x00
-	packet[HeaderLength+3] = 0x00
-	payloadLen := GetPayloadLength(packet)
+	payloadLen := GetPayloadLength(packet) //116 v
 	if len(packet) < HeaderLength+payloadLen {
 		return
 	}
-	l := (payloadLen % 2) == 1
+	packet[HeaderLength+2] = 0x00
+	packet[HeaderLength+3] = 0x00
+	result := 0
+	result += ReadPort(packet[8:10]) //src 16*8
+	result += ReadPort(packet[10:12])
+	result += ReadPort(packet[12:14])
+	result += ReadPort(packet[14:16])
+	result += ReadPort(packet[16:18])
+	result += ReadPort(packet[18:20])
+	result += ReadPort(packet[20:22])
+	result += ReadPort(packet[22:24])
+	result += ReadPort(packet[24:26]) //dst 16*8
+	result += ReadPort(packet[26:28])
+	result += ReadPort(packet[28:30])
+	result += ReadPort(packet[30:32])
+	result += ReadPort(packet[32:34])
+	result += ReadPort(packet[34:36])
+	result += ReadPort(packet[36:38])
+	result += ReadPort(packet[38:40])
+	result += ReadPort([]byte{0x00, 0x3a}) // zero + PTCL
+	tl1 := byte((payloadLen & 0xff00) >> 8)
+	tl2 := byte(payloadLen & 0x00ff)
+	result += ReadPort([]byte{tl1, tl2})        // icmpv6 length 150133
+	l := ((HeaderLength + payloadLen) % 2) == 1 // false
 	n := payloadLen / 2
 	for i := 0; i < n; i++ {
 		result += ReadPort(packet[HeaderLength+i*2 : HeaderLength+i*2+2])
@@ -269,4 +289,26 @@ func CalcICMPCheckSum(packet []byte) {
 	ll := result & 0x0000ffff
 	x := hl + ll
 	WritePort(packet[HeaderLength+2:HeaderLength+4], 0xffff-x)
+}
+
+func ParseSrcIcmpTag(b []byte, dstMode bool) *natmap.ICMPPair {
+	var result natmap.ICMPPair
+	result.IP = GetSrcAddr(b)
+	if dstMode {
+		result.Tag = ReadPort(b[HeaderLength+4 : HeaderLength+6])
+	} else {
+		result.Tag = ReadPort(b[HeaderLength : HeaderLength+2])
+	}
+	return &result
+}
+
+func ParseDstIcmpTag(b []byte, dstMode bool) *natmap.ICMPPair {
+	var result natmap.ICMPPair
+	result.IP = GetDstAddr(b)
+	if dstMode {
+		result.Tag = ReadPort(b[HeaderLength : HeaderLength+2])
+	} else {
+		result.Tag = ReadPort(b[HeaderLength+4 : HeaderLength+6])
+	}
+	return &result
 }

@@ -129,45 +129,38 @@ func (x *Server) convertDstAddr(packet []byte) {
 		//	return
 		//}
 		p := ipv4.GetProtocol(packet)
-		//log.Printf("Dst -0: %v\n", p)
 		if p == "tcp" {
-			//log.Printf("DstT -a: %v\n", packet)
 			dstAddr := ipv4.ParseDstTcp(packet)
 			x.Layer.V4Layer.ReplaceDstAddrTcp(packet, dstAddr)
 			ipv4.CalcIPCheckSum(packet)
 			ipv4.CalcTCPCheckSum(packet)
-			//log.Printf("DstT -b: %v\n", packet)
 		} else if p == "udp" {
-			//log.Printf("DstU -a: %v\n", packet)
 			dstAddr := ipv4.ParseDstUdp(packet)
 			x.Layer.V4Layer.ReplaceDstAddrUdp(packet, dstAddr)
 			ipv4.CalcIPCheckSum(packet)
 			ipv4.CalcUDPCheckSum(packet)
-			//log.Printf("DstU -b: %v\n", packet)
 		} else if p == "icmp" {
-			//log.Printf("DstU -a: %v\n", packet)
-			srcAddr := ipv4.ParseSrcIcmpTag(packet, true) // client ip
-			dstAddr := ipv4.ParseDstIcmpTag(packet, true) // dst ip
+			srcAddr := ipv4.ParseSrcIcmpTag(packet, true) // dst ip
+			dstAddr := ipv4.ParseDstIcmpTag(packet, true) // gateway ip
 			x.Layer.V4Layer.ReplaceDstAddrIcmp(packet, dstAddr, srcAddr)
 			ipv4.CalcIPCheckSum(packet)
 			ipv4.CalcICMPCheckSum(packet)
-			//log.Printf("DstU -b: %v\n", packet)
 		}
 	} else if version == 6 {
 		p := ipv6.GetProtocol(packet)
-		//srcAddr := ipv6.GetSrcAddr(packet)
-		//dstAddr := ipv6.GetDstAddr(packet)
-		//log.Printf("DST => p: %s, src: %s -> dst: %s\n", p, srcAddr.String(), dstAddr.String())
 		if p == "tcp" {
 			dstAddr := ipv6.ParseDstTcp(packet)
 			x.Layer.V6Layer.ReplaceDstAddrTcp(packet, dstAddr)
 			ipv6.CalcTCPCheckSum(packet)
 		} else if p == "udp" {
 			dstAddr := ipv6.ParseDstUdp(packet)
-			//log.Printf("DstU -a: %v\n", hex.EncodeToString(packet))
 			x.Layer.V6Layer.ReplaceDstAddrUdp(packet, dstAddr)
 			ipv6.CalcUDPCheckSum(packet)
-			//log.Printf("DstU -b: %v\n", hex.EncodeToString(packet))
+		} else if p == "icmp" {
+			srcAddr := ipv6.ParseSrcIcmpTag(packet, true) // dst ip
+			dstAddr := ipv6.ParseDstIcmpTag(packet, true) // gateway ip
+			x.Layer.V6Layer.ReplaceDstAddrIcmp(packet, dstAddr, srcAddr)
+			ipv6.CalcICMPCheckSum(packet)
 		}
 	}
 }
@@ -179,45 +172,38 @@ func (x *Server) convertSrcAddr(packet []byte) {
 		//	return
 		//}
 		p := ipv4.GetProtocol(packet)
-		//log.Printf("Src -0: %v\n", p)
 		if p == "tcp" {
-			//log.Printf("SrcT -a: %v\n", packet)
 			srcAddr := ipv4.ParseSrcTcp(packet)
 			x.Layer.V4Layer.ReplaceSrcAddrTcp(packet, srcAddr)
 			ipv4.CalcIPCheckSum(packet)
 			ipv4.CalcTCPCheckSum(packet)
-			//log.Printf("SrcT -b: %v\n", packet)
 		} else if p == "udp" {
-			//log.Printf("SrcU -a: %v\n", packet)
 			srcAddr := ipv4.ParseSrcUdp(packet)
 			x.Layer.V4Layer.ReplaceSrcAddrUdp(packet, srcAddr)
 			ipv4.CalcIPCheckSum(packet)
 			ipv4.CalcUDPCheckSum(packet)
-			//log.Printf("SrcU -b: %v\n", packet)
 		} else if p == "icmp" {
-			//log.Printf("SrcU -a: %v\n", packet)
 			srcAddr := ipv4.ParseSrcIcmpTag(packet, false) // client ip
 			dstAddr := ipv4.ParseDstIcmpTag(packet, false) // dst ip
 			x.Layer.V4Layer.ReplaceSrcAddrIcmp(packet, dstAddr, srcAddr)
 			ipv4.CalcIPCheckSum(packet)
 			ipv4.CalcICMPCheckSum(packet)
-			//log.Printf("SrcU -b: %v\n", packet)
 		}
 	} else if version == 6 {
 		p := ipv6.GetProtocol(packet)
-		//srcAddr := ipv6.GetSrcAddr(packet)
-		//dstAddr := ipv6.GetDstAddr(packet)
-		//log.Printf("SRC => p: %s, src: %s -> dst: %s\n", p, srcAddr.String(), dstAddr.String())
 		if p == "tcp" {
 			srcAddr := ipv6.ParseSrcTcp(packet)
 			x.Layer.V6Layer.ReplaceSrcAddrTcp(packet, srcAddr)
 			ipv6.CalcTCPCheckSum(packet)
 		} else if p == "udp" {
 			srcAddr := ipv6.ParseSrcUdp(packet)
-			//log.Printf("SrcU -a: %v\n", hex.EncodeToString(packet))
 			x.Layer.V6Layer.ReplaceSrcAddrUdp(packet, srcAddr)
 			ipv6.CalcUDPCheckSum(packet)
-			//log.Printf("SrcU -b: %v\n", hex.EncodeToString(packet))
+		} else if p == "icmp" {
+			srcAddr := ipv6.ParseSrcIcmpTag(packet, false) // client ip
+			dstAddr := ipv6.ParseDstIcmpTag(packet, false) // dst ip
+			x.Layer.V6Layer.ReplaceSrcAddrIcmp(packet, dstAddr, srcAddr)
+			ipv6.CalcICMPCheckSum(packet)
 		}
 	}
 }
