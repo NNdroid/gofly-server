@@ -153,8 +153,9 @@ func RunLocalHttpServer() {
 	})
 	r.GET("/myip", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
-			"ip":         c.Request.RemoteAddr,
+			"connection": c.Request.RemoteAddr,
 			"user-agent": c.Request.UserAgent(),
+			"ip":         c.ClientIP(),
 		})
 	})
 	r.GET("/", func(c *gin.Context) {
