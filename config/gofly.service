@@ -1,0 +1,17 @@
+[unit]
+Description=gofly
+
+Wants=network.target
+After=syslog.target network-online.target
+
+[Service]
+Type=simple
+Environment=GOGC=20
+ExecStart=/usr/local/bin/gofly -c /usr/local/etc/gofly/config.yaml
+Restart=on-failure
+RestartSec=10
+KillMode=process
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

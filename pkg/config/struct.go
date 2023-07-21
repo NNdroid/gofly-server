@@ -43,10 +43,17 @@ type WGConfig struct {
 }
 
 type WGPeer struct {
-	EndPoint     string `yaml:"end_point"`
-	PublicKey    string `yaml:"public_key"`
-	PreSharedKey string `yaml:"preshared_key"`
+	EndPoint     string   `yaml:"end_point"`
+	PublicKey    string   `yaml:"public_key"`
+	PreSharedKey string   `yaml:"preshared_key"`
+	KeepAlive    int      `yaml:"keep_alive"`
+	AllowedIPs   []string `yaml:"allowed_ips"`
 }
 
 func (config *Config) setDefault() {
+	for _, peer := range config.Wg.Peers {
+		if len(peer.AllowedIPs) == 0 {
+			peer.AllowedIPs = append(peer.AllowedIPs, "0.0.0.0/0", "::/0")
+		}
+	}
 }

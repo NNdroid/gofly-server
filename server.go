@@ -1,9 +1,11 @@
 package gofly
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 	"gofly/pkg/config"
 	"gofly/pkg/layers"
 	"gofly/pkg/layers/ipv4"
@@ -17,6 +19,9 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"os"
+	"strconv"
+	"strings"
 
 	"golang.zx2c4.com/wireguard/conn"
 	"golang.zx2c4.com/wireguard/device"
@@ -63,7 +68,7 @@ func StartServer(config *config.Config) {
 		log.Panic(err)
 	}
 	dev := device.NewDevice(tun, conn.NewDefaultBind(), device.NewLogger(device.LogLevelSilent, ""))
-	ClientConfig := fmt.Sprintf("private_key=%s\npublic_key=%s\npreshared_key=%s\nallowed_ip=0.0.0.0/0\nallowed_ip=::/0\npersistent_keepalive_interval=25\nendpoint=%s", config.Wg.SecretKey, config.Wg.Peers[0].PublicKey, config.Wg.Peers[0].PreSharedKey, config.Wg.Peers[0].EndPoint)
+	ClientConfig := createIPCRequest(config)
 	err = dev.IpcSet(ClientConfig)
 	if err != nil {
 		log.Panic(err)
@@ -122,4 +127,111 @@ func RunLocalHttpServer() {
 
 func Close() {
 	cancel()
+}
+
+// serialize the config into an IPC request
+func createIPCRequest(config *config.Config) string {
+	var request bytes.Buffer
+
+	request.WriteString(fmt.Sprintf("private_key=%s\n", config.Wg.SecretKey))
+
+	for _, peer := range config.Wg.Peers {
+		endpoint, err := parseEndpoints(peer.EndPoint)
+		if err != nil {
+			logger.Logger.Sugar().Error(zap.Error(err))
+			os.Exit(-1)
+		}
+		var appendPSKText = ""
+		if peer.PreSharedKey != "" {
+			appendPSKText = fmt.Sprintf("preshared_key=%s\n", peer.PreSharedKey)
+		}
+		request.WriteString(fmt.Sprintf("public_key=%s\nendpoint=%s\npersistent_keepalive_interval=%d\n%s",
+			peer.PublicKey, endpoint.String(), peer.KeepAlive, appendPSKText))
+		for _, ip := range peer.AllowedIPs {
+			request.WriteString(fmt.Sprintf("allowed_ip=%s\n", ip))
+		}
+	}
+	return request.String()[:request.Len()]
+}
+
+// convert endpoint string to netip.Addr
+func parseEndpoints(endpoint string) (*netip.AddrPort, error) {
+	var addr netip.Addr
+	var port uint16 = 2080
+	var err error
+	if strings.Contains(endpoint, ":") {
+		sp := strings.Split(endpoint, ":")
+		_port, err := strconv.Atoi(sp[1])
+		if err != nil {
+			return nil, err
+		}
+		endpoint = sp[0]
+		port = uint16(_port)
+	}
+	if IsDomainName(endpoint) {
+		ip, err := LookupDomainFirst(endpoint)
+		if err != nil {
+			return nil, err
+		}
+		endpoint = ip.String()
+	}
+	addr, err = netip.ParseAddr(endpoint)
+	if err != nil {
+		return nil, err
+	}
+	result := netip.AddrPortFrom(addr, port)
+	return &result, nil
+}
+
+func LookupDomain(domain string) ([]net.IP, error) {
+	return net.LookupIP(domain)
+}
+
+func LookupDomainFirst(domain string) (net.IP, error) {
+	ips, err := LookupDomain(domain)
+	if err != nil {
+		return nil, err
+	}
+	return ips[0], nil
+}
+
+func IsDomainName(s string) bool {
+	l := len(s)
+	if l == 0 || l > 254 || l == 254 && s[l-1] != '.' {
+		return false
+	}
+	last := byte('.')
+	nonNumeric := false
+	partlen := 0
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		default:
+			return false
+		case 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || c == '_':
+			nonNumeric = true
+			partlen++
+		case '0' <= c && c <= '9':
+			partlen++
+		case c == '-':
+			if last == '.' {
+				return false
+			}
+			partlen++
+			nonNumeric = true
+		case c == '.':
+			if last == '.' || last == '-' {
+				return false
+			}
+			if partlen > 63 || partlen == 0 {
+				return false
+			}
+			partlen = 0
+		}
+		last = c
+	}
+	if last == '-' || partlen > 63 {
+		return false
+	}
+	return nonNumeric
 }

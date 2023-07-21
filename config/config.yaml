@@ -1,0 +1,24 @@
+vtun:
+  local_addr: ':8080'
+  key: 'U7A2eKVN36Y9Tqxt'
+  protocol: ws
+  path: /PqfCxQx3M5qYjKcv
+  mtu: 1420
+  timeout: 30
+  buffer_size: 65535
+wg:
+  mtu: 1420
+  secret_key: ...
+  address:
+    - 172.16.0.2
+    - 2606:4700::3ce4:bab3
+  peers:
+    - public_key: ...
+      end_point: engage.cloudflareclient.com:2408
+      keep_alive: 25
+      allowed_ips:
+        - 0.0.0.0/0
+        - ::/0
+  dns:
+    - 1.1.1.1
+    - 8.8.8.8
