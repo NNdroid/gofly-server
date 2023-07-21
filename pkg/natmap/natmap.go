@@ -5,14 +5,29 @@ import (
 	"net"
 )
 
-var _tcpPort = 1024
-var _udpPort = 1024
-var _cacheTcpP = make(map[string]*net.TCPAddr, 65535)
-var _cacheTcpN = make(map[string]*net.TCPAddr, 65535)
-var _cacheUdpP = make(map[string]*net.UDPAddr, 65535)
-var _cacheUdpN = make(map[string]*net.UDPAddr, 65535)
-var _cacheICMPP = make(map[string]*ICMPPair, 65535) // client ip:tag1 => dst ip:tag2
-var _cacheICMPN = make(map[string]*ICMPPair, 65535) // dst ip:tag2 => client ip:tag1
+type NatMap struct {
+	_tcpPort    int
+	_udpPort    int
+	_cacheTcpP  map[string]*net.TCPAddr
+	_cacheTcpN  map[string]*net.TCPAddr
+	_cacheUdpP  map[string]*net.UDPAddr
+	_cacheUdpN  map[string]*net.UDPAddr
+	_cacheICMPP map[string]*ICMPPair // client ip:tag1 => dst ip:tag2
+	_cacheICMPN map[string]*ICMPPair // dst ip:tag2 => client ip:tag1
+}
+
+func New() *NatMap {
+	return &NatMap{
+		_tcpPort:    1024,
+		_udpPort:    1024,
+		_cacheTcpP:  make(map[string]*net.TCPAddr, 65535),
+		_cacheTcpN:  make(map[string]*net.TCPAddr, 65535),
+		_cacheUdpP:  make(map[string]*net.UDPAddr, 65535),
+		_cacheUdpN:  make(map[string]*net.UDPAddr, 65535),
+		_cacheICMPP: make(map[string]*ICMPPair, 65535), // client ip:tag1 => dst ip:tag2
+		_cacheICMPN: make(map[string]*ICMPPair, 65535), // dst ip:tag2 => client ip:tag1
+	}
+}
 
 type ICMPPair struct {
 	IP  net.IP
@@ -23,58 +38,58 @@ func (i *ICMPPair) String() string {
 	return fmt.Sprintf("%s:%d", i.IP.String(), i.Tag)
 }
 
-func ReserveIcmp(it *ICMPPair) *ICMPPair {
+func (x *NatMap) ReserveIcmp(it *ICMPPair) *ICMPPair {
 	var key = it.String()
-	if _, ok := _cacheICMPP[key]; ok {
-		return _cacheICMPP[key]
+	if _, ok := x._cacheICMPP[key]; ok {
+		return x._cacheICMPP[key]
 	}
-	if _, ok := _cacheICMPN[key]; ok {
-		return _cacheICMPN[key]
+	if _, ok := x._cacheICMPN[key]; ok {
+		return x._cacheICMPN[key]
 	}
 	return nil
 }
 
-func ReserveTcp(addr *net.TCPAddr) *net.TCPAddr {
+func (x *NatMap) ReserveTcp(addr *net.TCPAddr) *net.TCPAddr {
 	var key = addr.String()
-	if _, ok := _cacheTcpP[key]; ok {
-		return _cacheTcpP[key]
+	if _, ok := x._cacheTcpP[key]; ok {
+		return x._cacheTcpP[key]
 	}
-	if _, ok := _cacheTcpN[key]; ok {
-		return _cacheTcpN[key]
+	if _, ok := x._cacheTcpN[key]; ok {
+		return x._cacheTcpN[key]
 	}
 	return nil
 }
 
-func ReserveUdp(addr *net.UDPAddr) *net.UDPAddr {
+func (x *NatMap) ReserveUdp(addr *net.UDPAddr) *net.UDPAddr {
 	var key = addr.String()
-	if _, ok := _cacheUdpP[key]; ok {
-		return _cacheUdpP[key]
+	if _, ok := x._cacheUdpP[key]; ok {
+		return x._cacheUdpP[key]
 	}
-	if _, ok := _cacheUdpN[key]; ok {
-		return _cacheUdpN[key]
+	if _, ok := x._cacheUdpN[key]; ok {
+		return x._cacheUdpN[key]
 	}
 	return nil
 }
 
-func AppendIcmp(srcAddr *ICMPPair, dstAddr *ICMPPair) {
+func (x *NatMap) AppendIcmp(srcAddr *ICMPPair, dstAddr *ICMPPair) {
 	var keyP = srcAddr.String()
 	var keyN = dstAddr.String()
-	_cacheICMPP[keyP] = dstAddr
-	_cacheICMPN[keyN] = srcAddr
+	x._cacheICMPP[keyP] = dstAddr
+	x._cacheICMPN[keyN] = srcAddr
 }
 
-func AppendTcp(srcAddr *net.TCPAddr, dstAddr *net.TCPAddr) {
+func (x *NatMap) AppendTcp(srcAddr *net.TCPAddr, dstAddr *net.TCPAddr) {
 	var keyP = srcAddr.String()
 	var keyN = dstAddr.String()
-	_cacheTcpP[keyP] = dstAddr
-	_cacheTcpN[keyN] = srcAddr
+	x._cacheTcpP[keyP] = dstAddr
+	x._cacheTcpN[keyN] = srcAddr
 }
 
-func AppendUdp(srcAddr *net.UDPAddr, dstAddr *net.UDPAddr) {
+func (x *NatMap) AppendUdp(srcAddr *net.UDPAddr, dstAddr *net.UDPAddr) {
 	var keyP = srcAddr.String()
 	var keyN = dstAddr.String()
-	_cacheUdpP[keyP] = dstAddr
-	_cacheUdpN[keyN] = srcAddr
+	x._cacheUdpP[keyP] = dstAddr
+	x._cacheUdpN[keyN] = srcAddr
 }
 
 func NewIcmp(ip net.IP, tag int) *ICMPPair {
@@ -98,52 +113,53 @@ func NewUdp(ip net.IP, port int) *net.UDPAddr {
 	}
 }
 
-func CreateIcmp(srcAddr *ICMPPair, dstAddr *ICMPPair) *ICMPPair {
-	AppendIcmp(srcAddr, dstAddr)
+func (x *NatMap) CreateIcmp(srcAddr *ICMPPair, dstAddr *ICMPPair) *ICMPPair {
+	x.AppendIcmp(srcAddr, dstAddr)
 	return dstAddr
 }
 
-func CreateTcp(srcAddr *net.TCPAddr, ip net.IP) *net.TCPAddr {
-	var dstAddr = NewTcp(ip, _tcpPort)
-	AppendTcp(srcAddr, dstAddr)
-	_tcpPort = (_tcpPort + 1) % 65535
+func (x *NatMap) CreateTcp(srcAddr *net.TCPAddr, ip net.IP) *net.TCPAddr {
+	var dstAddr = NewTcp(ip, x._tcpPort)
+	x.AppendTcp(srcAddr, dstAddr)
+	x._tcpPort = (x._tcpPort + 1) % 65535
 	return dstAddr
 }
 
-func CreateUdp(srcAddr *net.UDPAddr, ip net.IP) *net.UDPAddr {
-	var dstAddr = NewUdp(ip, _udpPort)
-	AppendUdp(srcAddr, dstAddr)
-	_udpPort = (_udpPort + 1) % 65535
+func (x *NatMap) CreateUdp(srcAddr *net.UDPAddr, ip net.IP) *net.UDPAddr {
+	var dstAddr = NewUdp(ip, x._udpPort)
+	x.AppendUdp(srcAddr, dstAddr)
+	x._udpPort = (x._udpPort + 1) % 65535
 	return dstAddr
 }
 
-func CreateCheckIcmp(srcAddr *ICMPPair, dstAddr *ICMPPair) *ICMPPair {
-	reverseAddr := ReserveIcmp(srcAddr)
+func (x *NatMap) CreateCheckIcmp(srcAddr *ICMPPair, dstAddr *ICMPPair) *ICMPPair {
+	reverseAddr := x.ReserveIcmp(srcAddr)
 	if reverseAddr == nil {
-		reverseAddr = CreateIcmp(srcAddr, dstAddr)
+		reverseAddr = x.CreateIcmp(srcAddr, dstAddr)
 	}
 	return reverseAddr
 }
 
-func CreateCheckTcp(srcAddr *net.TCPAddr, ip net.IP, dstMode bool) *net.TCPAddr {
+func (x *NatMap) CreateCheckTcp(srcAddr *net.TCPAddr, ip net.IP, dstMode bool) *net.TCPAddr {
+	// Do not update NAT table in src mode when source address is same as local IP address
 	if srcAddr.IP.String() == ip.String() && !dstMode {
 		return nil
 	}
-	reverseAddr := ReserveTcp(srcAddr)
+	reverseAddr := x.ReserveTcp(srcAddr)
 	if reverseAddr == nil {
-		reverseAddr = CreateTcp(srcAddr, ip)
+		reverseAddr = x.CreateTcp(srcAddr, ip)
 	}
 	return reverseAddr
 }
 
-func CreateCheckUdp(srcAddr *net.UDPAddr, ip net.IP, dstMode bool) *net.UDPAddr {
-	//log.Printf("srcAddr: %s, ip: %s\n", srcAddr.String(), ip.String())
+func (x *NatMap) CreateCheckUdp(srcAddr *net.UDPAddr, ip net.IP, dstMode bool) *net.UDPAddr {
+	// Do not update NAT table in src mode when source address is same as local IP address
 	if srcAddr.IP.String() == ip.String() && !dstMode {
 		return nil
 	}
-	reverseAddr := ReserveUdp(srcAddr)
+	reverseAddr := x.ReserveUdp(srcAddr)
 	if reverseAddr == nil {
-		reverseAddr = CreateUdp(srcAddr, ip)
+		reverseAddr = x.CreateUdp(srcAddr, ip)
 	}
 	return reverseAddr
 }

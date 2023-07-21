@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"gofly/pkg/config"
 	"gofly/pkg/layers"
+	"gofly/pkg/layers/ipv4"
+	"gofly/pkg/layers/ipv6"
 	"gofly/pkg/protocol/ws"
 	ct "gofly/pkg/tun"
 	tun2 "golang.zx2c4.com/wireguard/tun"
@@ -22,6 +24,7 @@ var _ctx context.Context
 var cancel context.CancelFunc
 var tun tun2.Device
 var tnet *ct.Net
+var layer *layers.Layer
 
 func parseAddr(address []string) []netip.Addr {
 	var result []netip.Addr
@@ -33,8 +36,10 @@ func parseAddr(address []string) []netip.Addr {
 
 func StartServer(config *config.Config) {
 	_ctx, cancel = context.WithCancel(context.Background())
-	layers.SetReverseIP(config.Wg.Address[0])
-	layers.SetReverseIPv6(config.Wg.Address[1])
+	layer = &layers.Layer{
+		V4Layer: ipv4.New(config.Wg.Address[0]),
+		V6Layer: ipv6.New(config.Wg.Address[1]),
+	}
 	ct.Init(_ctx)
 	var err error
 	tun, tnet, err = ct.CreateNetTUN(
@@ -45,7 +50,7 @@ func StartServer(config *config.Config) {
 	if err != nil {
 		log.Panic(err)
 	}
-	dev := device.NewDevice(tun, conn.NewDefaultBind(), device.NewLogger(device.LogLevelVerbose, ""))
+	dev := device.NewDevice(tun, conn.NewDefaultBind(), device.NewLogger(device.LogLevelSilent, ""))
 	ClientConfig := fmt.Sprintf("private_key=%s\npublic_key=%s\npreshared_key=%s\nallowed_ip=0.0.0.0/0\nallowed_ip=::/0\npersistent_keepalive_interval=25\nendpoint=%s", config.Wg.SecretKey, config.Wg.Peers[0].PublicKey, config.Wg.Peers[0].PreSharedKey, config.Wg.Peers[0].EndPoint)
 	err = dev.IpcSet(ClientConfig)
 	if err != nil {
@@ -75,23 +80,25 @@ func StartServer(config *config.Config) {
 			log.Panicln(err)
 		}
 	}()
-	//bts, _ := hex.DecodeString("4500003eddb0400040111234ac10de02c0a8649fc3580035002a0272799201000001000000000000056374766d34063331303331300378797a00001c0001")
-	//tun.Write([][]byte{bts}, 0)
-	ws.StartServerForApi(config,
+	server := ws.New(layer)
+	server.StartServerForApi(
+		config,
 		func(bts []byte) (int, error) {
 			a := <-tnet.WaitRecvCh.Out
 			n := len(a)
 			copy(bts[:n], a)
 			return n, nil
 		},
-		func(i int) {
-		},
+		func(i int) {},
 		func(bts []byte) int {
 			n := len(bts)
 			tnet.WaitSendCh.In <- bts
 			return n
 		},
-		func(i int) {
-		},
+		func(i int) {},
 		_ctx)
+}
+
+func Close() {
+	cancel()
 }

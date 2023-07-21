@@ -6,6 +6,8 @@ import (
 	"go.uber.org/zap"
 	"gofly/pkg/config"
 	"gofly/pkg/layers"
+	"gofly/pkg/layers/ipv4"
+	"gofly/pkg/layers/ipv6"
 	"gofly/pkg/logger"
 	"log"
 	"net"
@@ -20,13 +22,23 @@ import (
 	"github.com/net-byte/vtun/common/cipher"
 )
 
+type Server struct {
+	Layer *layers.Layer
+}
+
+func New(layer *layers.Layer) *Server {
+	return &Server{
+		Layer: layer,
+	}
+}
+
 // StartServerForApi starts the ws server
-func StartServerForApi(config *config.Config, readFunc func([]byte) (int, error), readCallback func(int), writeFunc func([]byte) int, writeCallback func(int), _ctx context.Context) {
+func (x *Server) StartServerForApi(config *config.Config, readFunc func([]byte) (int, error), readCallback func(int), writeFunc func([]byte) int, writeCallback func(int), _ctx context.Context) {
 	// server -> client
-	go toClient(config, readFunc, readCallback, _ctx)
+	go x.toClient(config, readFunc, readCallback, _ctx)
 	// client -> server
 	http.HandleFunc(config.VTun.Path, func(w http.ResponseWriter, r *http.Request) {
-		if !checkPermission(w, r, config) {
+		if !x.checkPermission(w, r, config) {
 			logger.Logger.Error("[server] authentication failed")
 			return
 		}
@@ -35,7 +47,7 @@ func StartServerForApi(config *config.Config, readFunc func([]byte) (int, error)
 			logger.Logger.Error("[server] failed to upgrade http", zap.Error(err))
 			return
 		}
-		toServer(config, conn, writeFunc, writeCallback, _ctx)
+		x.toServer(config, conn, writeFunc, writeCallback, _ctx)
 	})
 
 	http.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
@@ -64,7 +76,7 @@ func StartServerForApi(config *config.Config, readFunc func([]byte) (int, error)
 }
 
 // checkPermission checks the permission of the request
-func checkPermission(w http.ResponseWriter, req *http.Request, config *config.Config) bool {
+func (x *Server) checkPermission(w http.ResponseWriter, req *http.Request, config *config.Config) bool {
 	if config.VTun.Key == "" {
 		return true
 	}
@@ -78,7 +90,7 @@ func checkPermission(w http.ResponseWriter, req *http.Request, config *config.Co
 }
 
 // toClient sends data to client
-func toClient(config *config.Config, readFunc func([]byte) (int, error), callback func(int), _ctx context.Context) {
+func (x *Server) toClient(config *config.Config, readFunc func([]byte) (int, error), callback func(int), _ctx context.Context) {
 	packet := make([]byte, config.VTun.BufferSize)
 	for contextOpened(_ctx) {
 		n, err := readFunc(packet)
@@ -90,7 +102,7 @@ func toClient(config *config.Config, readFunc func([]byte) (int, error), callbac
 			continue
 		}
 		b := packet[:n]
-		convertDstAddr(b)
+		x.convertDstAddr(b)
 		if key := netutil.GetDstKey(b); key != "" {
 			if v, ok := cache.GetCache().Get(key); ok {
 				if config.VTun.Obfs {
@@ -110,86 +122,108 @@ func toClient(config *config.Config, readFunc func([]byte) (int, error), callbac
 	}
 }
 
-func convertDstAddr(packet []byte) {
+func (x *Server) convertDstAddr(packet []byte) {
 	version := packet[0] >> 4
 	if version == 4 {
 		//if layers.IsPrivate(packet[12:16]) {
 		//	return
 		//}
-		p := layers.GetProtocol(packet)
+		p := ipv4.GetProtocol(packet)
 		//log.Printf("Dst -0: %v\n", p)
 		if p == "tcp" {
 			//log.Printf("DstT -a: %v\n", packet)
-			dstAddr := layers.ParseDstTcp(packet)
-			layers.ReplaceDstAddrTcp(packet, dstAddr)
-			layers.CalcIPCheckSum(packet)
-			layers.CalcTCPCheckSum(packet)
+			dstAddr := ipv4.ParseDstTcp(packet)
+			x.Layer.V4Layer.ReplaceDstAddrTcp(packet, dstAddr)
+			ipv4.CalcIPCheckSum(packet)
+			ipv4.CalcTCPCheckSum(packet)
 			//log.Printf("DstT -b: %v\n", packet)
 		} else if p == "udp" {
 			//log.Printf("DstU -a: %v\n", packet)
-			dstAddr := layers.ParseDstUdp(packet)
-			layers.ReplaceDstAddrUdp(packet, dstAddr)
-			layers.CalcIPCheckSum(packet)
-			layers.CalcUDPCheckSum(packet)
+			dstAddr := ipv4.ParseDstUdp(packet)
+			x.Layer.V4Layer.ReplaceDstAddrUdp(packet, dstAddr)
+			ipv4.CalcIPCheckSum(packet)
+			ipv4.CalcUDPCheckSum(packet)
 			//log.Printf("DstU -b: %v\n", packet)
 		} else if p == "icmp" {
 			//log.Printf("DstU -a: %v\n", packet)
-			srcAddr := layers.ParseSrcIcmpTag(packet, true) // client ip
-			dstAddr := layers.ParseDstIcmpTag(packet, true) // dst ip
-			layers.ReplaceDstAddrIcmp(packet, dstAddr, srcAddr)
-			layers.CalcIPCheckSum(packet)
-			layers.CalcICMPCheckSum(packet)
+			srcAddr := ipv4.ParseSrcIcmpTag(packet, true) // client ip
+			dstAddr := ipv4.ParseDstIcmpTag(packet, true) // dst ip
+			x.Layer.V4Layer.ReplaceDstAddrIcmp(packet, dstAddr, srcAddr)
+			ipv4.CalcIPCheckSum(packet)
+			ipv4.CalcICMPCheckSum(packet)
 			//log.Printf("DstU -b: %v\n", packet)
 		}
 	} else if version == 6 {
-		p := layers.GetProtocolV6(packet)
-		srcAddr := layers.GetSrcAddrV6(packet)
-		dstAddr := layers.GetDstAddrV6(packet)
-		log.Printf("DST => p: %s, src: %s -> dst: %s\n", p, srcAddr.String(), dstAddr.String())
+		p := ipv6.GetProtocol(packet)
+		//srcAddr := ipv6.GetSrcAddr(packet)
+		//dstAddr := ipv6.GetDstAddr(packet)
+		//log.Printf("DST => p: %s, src: %s -> dst: %s\n", p, srcAddr.String(), dstAddr.String())
+		if p == "tcp" {
+			dstAddr := ipv6.ParseDstTcp(packet)
+			x.Layer.V6Layer.ReplaceDstAddrTcp(packet, dstAddr)
+			ipv6.CalcTCPCheckSum(packet)
+		} else if p == "udp" {
+			dstAddr := ipv6.ParseDstUdp(packet)
+			//log.Printf("DstU -a: %v\n", hex.EncodeToString(packet))
+			x.Layer.V6Layer.ReplaceDstAddrUdp(packet, dstAddr)
+			ipv6.CalcUDPCheckSum(packet)
+			//log.Printf("DstU -b: %v\n", hex.EncodeToString(packet))
+		}
 	}
 }
 
-func convertSrcAddr(packet []byte) {
+func (x *Server) convertSrcAddr(packet []byte) {
 	version := packet[0] >> 4
 	if version == 4 {
 		//if layers.IsPrivate(packet[16:20]) {
 		//	return
 		//}
-		p := layers.GetProtocol(packet)
+		p := ipv4.GetProtocol(packet)
 		//log.Printf("Src -0: %v\n", p)
 		if p == "tcp" {
 			//log.Printf("SrcT -a: %v\n", packet)
-			dstAddr := layers.ParseSrcTcp(packet)
-			layers.ReplaceSrcAddrTcp(packet, dstAddr)
-			layers.CalcIPCheckSum(packet)
-			layers.CalcTCPCheckSum(packet)
+			srcAddr := ipv4.ParseSrcTcp(packet)
+			x.Layer.V4Layer.ReplaceSrcAddrTcp(packet, srcAddr)
+			ipv4.CalcIPCheckSum(packet)
+			ipv4.CalcTCPCheckSum(packet)
 			//log.Printf("SrcT -b: %v\n", packet)
 		} else if p == "udp" {
 			//log.Printf("SrcU -a: %v\n", packet)
-			dstAddr := layers.ParseSrcUdp(packet)
-			layers.ReplaceSrcAddrUdp(packet, dstAddr)
-			layers.CalcIPCheckSum(packet)
-			layers.CalcUDPCheckSum(packet)
+			srcAddr := ipv4.ParseSrcUdp(packet)
+			x.Layer.V4Layer.ReplaceSrcAddrUdp(packet, srcAddr)
+			ipv4.CalcIPCheckSum(packet)
+			ipv4.CalcUDPCheckSum(packet)
 			//log.Printf("SrcU -b: %v\n", packet)
 		} else if p == "icmp" {
 			//log.Printf("SrcU -a: %v\n", packet)
-			srcAddr := layers.ParseSrcIcmpTag(packet, false) // client ip
-			dstAddr := layers.ParseDstIcmpTag(packet, false) // dst ip
-			layers.ReplaceSrcAddrIcmp(packet, dstAddr, srcAddr)
-			layers.CalcIPCheckSum(packet)
-			layers.CalcICMPCheckSum(packet)
+			srcAddr := ipv4.ParseSrcIcmpTag(packet, false) // client ip
+			dstAddr := ipv4.ParseDstIcmpTag(packet, false) // dst ip
+			x.Layer.V4Layer.ReplaceSrcAddrIcmp(packet, dstAddr, srcAddr)
+			ipv4.CalcIPCheckSum(packet)
+			ipv4.CalcICMPCheckSum(packet)
 			//log.Printf("SrcU -b: %v\n", packet)
 		}
 	} else if version == 6 {
-		p := layers.GetProtocolV6(packet)
-		srcAddr := layers.GetSrcAddrV6(packet)
-		dstAddr := layers.GetDstAddrV6(packet)
-		log.Printf("SRC => p: %s, src: %s -> dst: %s\n", p, srcAddr.String(), dstAddr.String())
+		p := ipv6.GetProtocol(packet)
+		//srcAddr := ipv6.GetSrcAddr(packet)
+		//dstAddr := ipv6.GetDstAddr(packet)
+		//log.Printf("SRC => p: %s, src: %s -> dst: %s\n", p, srcAddr.String(), dstAddr.String())
+		if p == "tcp" {
+			srcAddr := ipv6.ParseSrcTcp(packet)
+			x.Layer.V6Layer.ReplaceSrcAddrTcp(packet, srcAddr)
+			ipv6.CalcTCPCheckSum(packet)
+		} else if p == "udp" {
+			srcAddr := ipv6.ParseSrcUdp(packet)
+			//log.Printf("SrcU -a: %v\n", hex.EncodeToString(packet))
+			x.Layer.V6Layer.ReplaceSrcAddrUdp(packet, srcAddr)
+			ipv6.CalcUDPCheckSum(packet)
+			//log.Printf("SrcU -b: %v\n", hex.EncodeToString(packet))
+		}
 	}
 }
 
 // toServer sends data to server
-func toServer(config *config.Config, conn net.Conn, writeFunc func([]byte) int, callback func(int), _ctx context.Context) {
+func (x *Server) toServer(config *config.Config, conn net.Conn, writeFunc func([]byte) int, callback func(int), _ctx context.Context) {
 	defer conn.Close()
 	for contextOpened(_ctx) {
 		b, op, err := wsutil.ReadClientData(conn)
@@ -212,7 +246,7 @@ func toServer(config *config.Config, conn net.Conn, writeFunc func([]byte) int, 
 			}
 			if key := netutil.GetSrcKey(b); key != "" {
 				cache.GetCache().Set(key, conn, 24*time.Hour)
-				convertSrcAddr(b)
+				x.convertSrcAddr(b)
 				callback(len(b))
 				writeFunc(b)
 			}

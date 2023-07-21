@@ -1,14 +1,25 @@
-package layers
+package ipv4
 
 import (
 	"gofly/pkg/natmap"
 	"net"
+	"strconv"
 )
 
-var reverseIP net.IP
+type V4Layer struct {
+	ReverseIP net.IP
+	NatTable  *natmap.NatMap
+}
 
-func SetReverseIP(ip string) {
-	reverseIP = net.ParseIP(ip)
+func (x *V4Layer) SetReverseIP(ip string) {
+	x.ReverseIP = net.ParseIP(ip)
+}
+
+func New(ip string) *V4Layer {
+	return &V4Layer{
+		ReverseIP: net.ParseIP(ip),
+		NatTable:  natmap.New(),
+	}
 }
 
 func ParseSrcTcp(b []byte) *net.TCPAddr {
@@ -51,65 +62,55 @@ func ParseDstUdp(b []byte) *net.UDPAddr {
 	}
 }
 
-func ReplaceSrcAddrIcmp(b []byte, srcAddr *natmap.ICMPPair, dstAddr *natmap.ICMPPair) {
-	reverseAddr := natmap.CreateCheckIcmp(srcAddr, dstAddr)
+func (x *V4Layer) ReplaceSrcAddrIcmp(b []byte, srcAddr *natmap.ICMPPair, dstAddr *natmap.ICMPPair) {
+	reverseAddr := x.NatTable.CreateCheckIcmp(srcAddr, dstAddr)
 	if reverseAddr != nil {
-		//log.Printf("ReplaceSrcAddrTcp %s => %s\n", ParseSrcTcp(b).String(), reverseAddr.String())
-		copy(b[12:16], reverseIP.To4()[:])
+		copy(b[12:16], x.ReverseIP.To4()[:])
 	}
 }
 
-func ReplaceDstAddrIcmp(b []byte, srcAddr *natmap.ICMPPair, dstAddr *natmap.ICMPPair) {
-	reverseAddr := natmap.CreateCheckIcmp(dstAddr, srcAddr)
+func (x *V4Layer) ReplaceDstAddrIcmp(b []byte, srcAddr *natmap.ICMPPair, dstAddr *natmap.ICMPPair) {
+	reverseAddr := x.NatTable.CreateCheckIcmp(dstAddr, srcAddr)
 	if reverseAddr != nil {
-		//log.Printf("ReplaceSrcAddrTcp %s => %s\n", ParseSrcTcp(b).String(), reverseAddr.String())
 		copy(b[16:20], reverseAddr.IP.To4()[:])
 	}
 }
 
-func ReplaceSrcAddrTcp(b []byte, addr *net.TCPAddr) {
+func (x *V4Layer) ReplaceSrcAddrTcp(b []byte, addr *net.TCPAddr) {
 	ip4HeaderLen := GetHeaderLength(b)
-	reverseAddr := natmap.CreateCheckTcp(addr, reverseIP, false)
+	reverseAddr := x.NatTable.CreateCheckTcp(addr, x.ReverseIP, false)
 	if reverseAddr != nil {
-		//log.Printf("ReplaceSrcAddrTcp %s => %s\n", ParseSrcTcp(b).String(), reverseAddr.String())
 		copy(b[12:16], reverseAddr.IP.To4()[:])
 		WritePort(b[ip4HeaderLen+0:ip4HeaderLen+2], reverseAddr.Port)
 	}
 }
 
-func ReplaceSrcAddrUdp(b []byte, addr *net.UDPAddr) {
+func (x *V4Layer) ReplaceSrcAddrUdp(b []byte, addr *net.UDPAddr) {
 	ip4HeaderLen := GetHeaderLength(b)
-	reverseAddr := natmap.CreateCheckUdp(addr, reverseIP, false)
+	reverseAddr := x.NatTable.CreateCheckUdp(addr, x.ReverseIP, false)
 	if reverseAddr != nil {
-		//log.Printf("ReplaceSrcAddrUdp %s => %s\n", ParseSrcUdp(b).String(), reverseAddr.String())
 		copy(b[12:16], reverseAddr.IP.To4()[:])
 		WritePort(b[ip4HeaderLen+0:ip4HeaderLen+2], reverseAddr.Port)
 	}
 }
 
-func ReplaceDstAddrTcp(b []byte, addr *net.TCPAddr) {
+func (x *V4Layer) ReplaceDstAddrTcp(b []byte, addr *net.TCPAddr) {
 	ip4HeaderLen := GetHeaderLength(b)
-	reverseAddr := natmap.CreateCheckTcp(addr, reverseIP, true)
-	//log.Printf("reverseAddr: %s\n", reverseAddr.String())
+	reverseAddr := x.NatTable.CreateCheckTcp(addr, x.ReverseIP, true)
 	if reverseAddr != nil {
-		//log.Printf("ReplaceDstAddrTcp %s => %s\n", ParseDstTcp(b).String(), reverseAddr.String())
 		copy(b[16:20], reverseAddr.IP.To4()[:])
 		WritePort(b[ip4HeaderLen+2:ip4HeaderLen+4], reverseAddr.Port)
 	}
 }
 
-func ReplaceDstAddrUdp(b []byte, addr *net.UDPAddr) {
+func (x *V4Layer) ReplaceDstAddrUdp(b []byte, addr *net.UDPAddr) {
 	ip4HeaderLen := GetHeaderLength(b)
-	reverseAddr := natmap.CreateCheckUdp(addr, reverseIP, true)
-	//log.Printf("reverseAddr: %s\n", reverseAddr.String())
+	reverseAddr := x.NatTable.CreateCheckUdp(addr, x.ReverseIP, true)
 	if reverseAddr != nil {
-		//log.Printf("ReplaceDstAddrUdp %s => %s\n", ParseDstUdp(b).String(), reverseAddr.String())
 		copy(b[16:20], reverseAddr.IP.To4()[:])
 		WritePort(b[ip4HeaderLen+2:ip4HeaderLen+4], reverseAddr.Port)
 	}
 }
-
-const HeaderLength = 2
 
 // ReadPort []byte length to int length
 func ReadPort(header []byte) int {
@@ -136,7 +137,7 @@ func GetProtocol(b []byte) string {
 	} else if b[9] == 0x11 {
 		return "udp"
 	}
-	return ""
+	return strconv.Itoa(int(b[9]))
 }
 
 func IsPrivate(ip []byte) bool {
@@ -166,10 +167,6 @@ func CalcUDPCheckSum(packet []byte) {
 	packet[ip4HeaderLen+6] = 0x00
 	packet[ip4HeaderLen+7] = 0x00
 	result := 0
-	//result += ReadPort(packet[12:14])
-	//result += ReadPort(packet[14:16])
-	//result += ReadPort(packet[16:18])
-	//result += ReadPort(packet[18:20])
 	result += ReadPort(packet[12:14])      // src address 49320
 	result += ReadPort(packet[14:16])      // 74932
 	result += ReadPort(packet[16:18])      // dst address 124252
@@ -179,20 +176,16 @@ func CalcUDPCheckSum(packet []byte) {
 	tl2 := byte(ip4PayloadLen & 0x00ff)
 	result += ReadPort([]byte{tl1, tl2})           // tcp length 150133
 	l := ((ip4HeaderLen + ip4PayloadLen) % 2) == 1 // false
-	//n := ip4PayloadLen / 2
 	n := ip4PayloadLen / 2
 	for i := 0; i < n; i++ {
 		result += ReadPort(packet[ip4HeaderLen+i*2 : ip4HeaderLen+i*2+2])
-		//log.Printf("result: %d\n", result)
 	}
 	if l {
 		result += (int(packet[ip4HeaderLen+ip4PayloadLen-1]) << 8) & 0xff00
-		//log.Printf("result ex: %d\n", result)
 	}
 	hl := ((result & 0xffff0000) >> 16) & 0x0000ffff
 	ll := result & 0x0000ffff
 	x := hl + ll
-	//log.Printf("result: %d\n", 0xffff-x) //4137
 	WritePort(packet[ip4HeaderLen+6:ip4HeaderLen+8], 0xffff-x)
 }
 
@@ -205,10 +198,6 @@ func CalcTCPCheckSum(packet []byte) {
 	packet[ip4HeaderLen+16] = 0x00
 	packet[ip4HeaderLen+17] = 0x00
 	result := 0
-	//result += ReadPort(packet[12:14])
-	//result += ReadPort(packet[14:16])
-	//result += ReadPort(packet[16:18])
-	//result += ReadPort(packet[18:20])
 	result += ReadPort(packet[12:14])      // src address 49320
 	result += ReadPort(packet[14:16])      // 74932
 	result += ReadPort(packet[16:18])      // dst address 124252
@@ -218,20 +207,16 @@ func CalcTCPCheckSum(packet []byte) {
 	tl2 := byte(ip4PayloadLen & 0x00ff)
 	result += ReadPort([]byte{tl1, tl2})           // tcp length 150133
 	l := ((ip4HeaderLen + ip4PayloadLen) % 2) == 1 // false
-	//n := ip4PayloadLen / 2
 	n := ip4PayloadLen / 2
 	for i := 0; i < n; i++ {
 		result += ReadPort(packet[ip4HeaderLen+i*2 : ip4HeaderLen+i*2+2])
-		//log.Printf("result: %d\n", result)
 	}
 	if l {
 		result += (int(packet[ip4HeaderLen+ip4PayloadLen-1]) << 8) & 0xff00
-		//log.Printf("result ex: %d\n", result)
 	}
 	hl := ((result & 0xffff0000) >> 16) & 0x0000ffff
 	ll := result & 0x0000ffff
 	x := hl + ll
-	//log.Printf("result: %d\n", 0xffff-x) //4137
 	WritePort(packet[ip4HeaderLen+16:ip4HeaderLen+18], 0xffff-x)
 }
 
@@ -240,22 +225,17 @@ func CalcIPCheckSum(packet []byte) {
 	packet[11] = 0x00
 	result := ReadPort(packet[10:12])
 	ip4HeaderLen := GetHeaderLength(packet)
-	//log.Printf("headerlen: %d\n", ip4HeaderLen)
 	l := (ip4HeaderLen % 2) == 1
 	n := ip4HeaderLen / 2
 	for i := 0; i < n; i++ {
 		result += ReadPort(packet[i*2 : i*2+2])
-		//log.Printf("result: %d\n", result)
 	}
 	if l {
 		result += int(packet[ip4HeaderLen-1])
-		//log.Printf("result ex: %d\n", result)
 	}
 	hl := ((result & 0xffff0000) >> 16) & 0x0000ffff
 	ll := result & 0x0000ffff
 	x := hl + ll
-	//log.Printf("result: %d\n", x)
-	//log.Printf("result: %d\n", 0xffff-x)
 	WritePort(packet[10:12], 0xffff-x)
 }
 
@@ -265,22 +245,20 @@ func CalcICMPCheckSum(packet []byte) {
 	packet[ip4HeaderLen+2] = 0x00
 	packet[ip4HeaderLen+3] = 0x00
 	ip4PayloadLen := GetPayloadLength(packet)
-	//log.Printf("headerlen: %d\n", ip4HeaderLen)
+	if len(packet) < ip4HeaderLen+ip4PayloadLen {
+		return
+	}
 	l := (ip4PayloadLen % 2) == 1
 	n := ip4PayloadLen / 2
 	for i := 0; i < n; i++ {
 		result += ReadPort(packet[ip4HeaderLen+i*2 : ip4HeaderLen+i*2+2])
-		//log.Printf("result: %d\n", result)
 	}
 	if l {
 		result += (int(packet[ip4HeaderLen+ip4PayloadLen-1]) << 8) & 0xff00
-		//log.Printf("result ex: %d\n", result)
 	}
 	hl := ((result & 0xffff0000) >> 16) & 0x0000ffff
 	ll := result & 0x0000ffff
 	x := hl + ll
-	//log.Printf("result: %d\n", x)
-	//log.Printf("result: %d\n", 0xffff-x)
 	WritePort(packet[ip4HeaderLen+2:ip4HeaderLen+4], 0xffff-x)
 }
 
@@ -288,9 +266,10 @@ func ParseSrcIcmpTag(b []byte, dstMode bool) *natmap.ICMPPair {
 	ip4HeaderLen := GetHeaderLength(b)
 	var result natmap.ICMPPair
 	result.IP = net.IP{b[12], b[13], b[14], b[15]}
-	result.Tag = ReadPort(b[ip4HeaderLen : ip4HeaderLen+2])
 	if dstMode {
 		result.Tag = ReadPort(b[ip4HeaderLen+4 : ip4HeaderLen+6])
+	} else {
+		result.Tag = ReadPort(b[ip4HeaderLen : ip4HeaderLen+2])
 	}
 	return &result
 }
@@ -299,9 +278,10 @@ func ParseDstIcmpTag(b []byte, dstMode bool) *natmap.ICMPPair {
 	ip4HeaderLen := GetHeaderLength(b)
 	var result natmap.ICMPPair
 	result.IP = net.IP{b[16], b[17], b[18], b[19]}
-	result.Tag = ReadPort(b[ip4HeaderLen+4 : ip4HeaderLen+6])
 	if dstMode {
 		result.Tag = ReadPort(b[ip4HeaderLen : ip4HeaderLen+2])
+	} else {
+		result.Tag = ReadPort(b[ip4HeaderLen+4 : ip4HeaderLen+6])
 	}
 	return &result
 }

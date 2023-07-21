@@ -9,8 +9,10 @@ require (
 	github.com/golang/snappy v0.0.4
 	github.com/net-byte/vtun v0.0.0-00010101000000-000000000000
 	go.uber.org/zap v1.24.0
+	golang.org/x/net v0.10.0
 	golang.zx2c4.com/wireguard v0.0.0-20230704135630-469159ecf7d1
 	gopkg.in/yaml.v3 v3.0.1
+	gvisor.dev/gvisor v0.0.0-20230504175454-7b0a1988a28f
 )
 
 require (
@@ -31,13 +33,11 @@ require (
 	go4.org/mem v0.0.0-20220726221520-4f986261bf13 // indirect
 	golang.org/x/crypto v0.8.0 // indirect
 	golang.org/x/exp v0.0.0-20230425010034-47ecfdc1ba53 // indirect
-	golang.org/x/net v0.10.0 // indirect
 	golang.org/x/sync v0.2.0 // indirect
 	golang.org/x/sys v0.8.1-0.20230609144347-5059a07aa46a // indirect
 	golang.org/x/text v0.9.0 // indirect
 	golang.org/x/time v0.3.0 // indirect
 	golang.zx2c4.com/wintun v0.0.0-20230126152724-0fa3db229ce2 // indirect
 	golang.zx2c4.com/wireguard/windows v0.5.3 // indirect
-	gvisor.dev/gvisor v0.0.0-20230504175454-7b0a1988a28f // indirect
 	tailscale.com v1.44.0 // indirect
 )
