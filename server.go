@@ -80,7 +80,7 @@ func StartServer(config *config.Config) {
 		log.Panic(err)
 	}
 	go ReadTunSync(config)
-	go RunHttpClient()
+	//go RunHttpClient()
 	go RunLocalHttpServer()
 	server := &ws.Server{
 		Layer:          layer,
