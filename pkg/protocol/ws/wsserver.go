@@ -37,7 +37,8 @@ func (x *Server) StartServerForApi(config *config.Config, readFunc func([]byte) 
 	// server -> client
 	go x.toClient(config, readFunc, readCallback, _ctx)
 	// client -> server
-	http.HandleFunc(config.VTun.Path, func(w http.ResponseWriter, r *http.Request) {
+	srv := http.NewServeMux()
+	srv.HandleFunc(config.VTun.Path, func(w http.ResponseWriter, r *http.Request) {
 		if !x.checkPermission(w, r, config) {
 			logger.Logger.Error("[server] authentication failed")
 			return
@@ -50,7 +51,7 @@ func (x *Server) StartServerForApi(config *config.Config, readFunc func([]byte) 
 		x.toServer(config, conn, writeFunc, writeCallback, _ctx)
 	})
 
-	http.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
+	srv.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Header().Set("Content-Type", "text/plain")
 		w.Header().Set("Content-Length", "6")
@@ -63,12 +64,12 @@ func (x *Server) StartServerForApi(config *config.Config, readFunc func([]byte) 
 
 	log.Printf("vtun websocket server started on %v", config.VTun.LocalAddr)
 	if config.VTun.Protocol == "wss" && config.VTun.TLSCertificateFilePath != "" && config.VTun.TLSCertificateKeyFilePath != "" {
-		err := http.ListenAndServeTLS(config.VTun.LocalAddr, config.VTun.TLSCertificateFilePath, config.VTun.TLSCertificateKeyFilePath, nil)
+		err := http.ListenAndServeTLS(config.VTun.LocalAddr, config.VTun.TLSCertificateFilePath, config.VTun.TLSCertificateKeyFilePath, srv)
 		if err != nil {
 			logger.Logger.Fatal("http listen Error", zap.Error(err))
 		}
 	} else {
-		err := http.ListenAndServe(config.VTun.LocalAddr, nil)
+		err := http.ListenAndServe(config.VTun.LocalAddr, srv)
 		if err != nil {
 			logger.Logger.Fatal("http listen Error", zap.Error(err))
 		}

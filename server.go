@@ -3,14 +3,16 @@ package gofly
 import (
 	"context"
 	"fmt"
+	"github.com/gin-gonic/gin"
 	"gofly/pkg/config"
 	"gofly/pkg/layers"
 	"gofly/pkg/layers/ipv4"
 	"gofly/pkg/layers/ipv6"
+	"gofly/pkg/logger"
 	"gofly/pkg/protocol/ws"
 	ct "gofly/pkg/tun"
+	"gofly/pkg/utils"
 	tun2 "golang.zx2c4.com/wireguard/tun"
-	"io"
 	"log"
 	"net"
 	"net/http"
@@ -36,9 +38,19 @@ func parseAddr(address []string) []netip.Addr {
 
 func StartServer(config *config.Config) {
 	_ctx, cancel = context.WithCancel(context.Background())
+	ipv4Addr := utils.FindAIPv4Address(config.Wg.Address)
+	if ipv4Addr == "" {
+		logger.Logger.Fatal("can not find a ipv4 address from configuration.")
+		return
+	}
+	ipv6Addr := utils.FindAIPv6Address(config.Wg.Address)
+	if ipv6Addr == "" {
+		logger.Logger.Fatal("can not find a ipv6 address from configuration.")
+		return
+	}
 	layer = &layers.Layer{
-		V4Layer: ipv4.New(config.Wg.Address[0]),
-		V6Layer: ipv6.New(config.Wg.Address[1]),
+		V4Layer: ipv4.New(ipv4Addr),
+		V6Layer: ipv6.New(ipv6Addr),
 	}
 	ct.Init(_ctx)
 	var err error
@@ -60,27 +72,9 @@ func StartServer(config *config.Config) {
 	if err != nil {
 		log.Panic(err)
 	}
-	//pr, _ := hex.DecodeString(config.Wg.Peers[0].PublicKey)
-	//pk := device.NoisePublicKey{}
-	//pk.FromHex(config.Wg.Peers[0].PublicKey)
-	//peer := dev.LookupPeer(pk)
-	//go peer.RoutineSequentialReceiver(1)
-	//go peer.RoutineSequentialReceiver(1)
-	go func() {
-		listener, err := tnet.ListenTCP(&net.TCPAddr{Port: 80})
-		if err != nil {
-			log.Panicln(err)
-		}
-		http.HandleFunc("/vvvv", func(writer http.ResponseWriter, request *http.Request) {
-			log.Printf("> %s - %s - %s", request.RemoteAddr, request.URL.String(), request.UserAgent())
-			io.WriteString(writer, "Hello from userspace TCP!")
-		})
-		err = http.Serve(listener, nil)
-		if err != nil {
-			log.Panicln(err)
-		}
-	}()
+	go RunLocalHttpServer()
 	server := ws.New(layer)
+	//websocket server
 	server.StartServerForApi(
 		config,
 		func(bts []byte) (int, error) {
@@ -97,6 +91,33 @@ func StartServer(config *config.Config) {
 		},
 		func(i int) {},
 		_ctx)
+}
+
+func RunLocalHttpServer() {
+	listener, err := tnet.ListenTCP(&net.TCPAddr{Port: 80})
+	if err != nil {
+		log.Panicln(err)
+	}
+	gin.SetMode(gin.ReleaseMode)
+	r := gin.Default()
+	r.GET("/ping", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"message": "pong",
+		})
+	})
+	r.GET("/myip", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"ip":         c.Request.RemoteAddr,
+			"user-agent": c.Request.UserAgent(),
+		})
+	})
+	r.GET("/", func(c *gin.Context) {
+		c.String(http.StatusOK, ":)   this is vpn gateway!")
+	})
+	err = r.RunListener(listener)
+	if err != nil {
+		log.Panicln(err)
+	}
 }
 
 func Close() {
