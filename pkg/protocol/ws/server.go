@@ -2,6 +2,7 @@ package ws
 
 import (
 	"context"
+	"errors"
 	"github.com/lesismal/nbio/logging"
 	"github.com/lesismal/nbio/nbhttp"
 	"github.com/lesismal/nbio/nbhttp/websocket"
@@ -39,9 +40,19 @@ type Server struct {
 func (x *Server) newUpgrade() *websocket.Upgrader {
 	u := websocket.NewUpgrader()
 	u.CheckOrigin = func(r *http.Request) bool { return true }
+	u.SetPingHandler(func(c *websocket.Conn, s string) {
+		logger.Logger.Sugar().Debugf("received ping message <%v> from %s\n", s, c.Conn.RemoteAddr().String())
+		err := c.WriteMessage(websocket.PongMessage, []byte(s))
+		if err != nil {
+			logger.Logger.Sugar().Errorf("try to send pong error: %v\n", err)
+			c.CloseWithError(errors.New("try to send pong error"))
+		}
+	})
+	u.SetPongHandler(func(c *websocket.Conn, s string) {
+		logger.Logger.Sugar().Debugf("received pong message <%v> from %s\n", s, c.Conn.RemoteAddr().String())
+	})
 	u.OnMessage(func(c *websocket.Conn, messageType websocket.MessageType, data []byte) {
 		if messageType == websocket.BinaryMessage {
-			//logger.Logger.Sugar().Debugf("rdata: %s", hex.EncodeToString(data))
 			if x.Config.VTun.Compress {
 				data, _ = snappy.Decode(nil, data)
 			}
@@ -58,7 +69,7 @@ func (x *Server) newUpgrade() *websocket.Upgrader {
 	})
 
 	u.OnClose(func(c *websocket.Conn, err error) {
-		logger.Logger.Sugar().Infof("OnClose: %s -> %v", c.RemoteAddr().String(), zap.Error(err))
+		logger.Logger.Sugar().Debugf("closed: %s -> %v", c.RemoteAddr().String(), zap.Error(err))
 	})
 	return u
 }
@@ -78,7 +89,7 @@ func (x *Server) onWebsocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	//conn.SetReadDeadline(time.Time{})
-	logger.Logger.Sugar().Debugf("OnOpen: %s", conn.RemoteAddr().String())
+	logger.Logger.Sugar().Debugf("open: %s", conn.RemoteAddr().String())
 }
 
 // StartServerForApi starts the ws server
@@ -171,7 +182,6 @@ func (x *Server) toClient() {
 			continue
 		}
 		b := packet[:n]
-		//logger.Logger.Sugar().Debugf("wdata: %s", hex.EncodeToString(b))
 		x.convertDstAddr(b)
 		if key := utils.GetDstKey(b); key != "" {
 			if v, ok := cache.GetCache().Get(key); ok {
