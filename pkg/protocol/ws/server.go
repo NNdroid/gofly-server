@@ -2,22 +2,25 @@ package ws
 
 import (
 	"context"
-	"github.com/net-byte/vtun/common/netutil"
+	"github.com/lesismal/nbio/logging"
+	"github.com/lesismal/nbio/nbhttp"
+	"github.com/lesismal/nbio/nbhttp/websocket"
 	"go.uber.org/zap"
 	"gofly/pkg/config"
 	"gofly/pkg/layers"
 	"gofly/pkg/layers/ipv4"
 	"gofly/pkg/layers/ipv6"
 	"gofly/pkg/logger"
+	"gofly/pkg/utils"
 	"log"
-	"net"
 	"net/http"
+	"os"
+	"os/signal"
 	"time"
 
-	"github.com/gobwas/ws"
-	"github.com/gobwas/ws/wsutil"
 	"github.com/golang/snappy"
 
+	"github.com/lesismal/llib/std/crypto/tls"
 	"github.com/net-byte/vtun/common/cache"
 	"github.com/net-byte/vtun/common/cipher"
 )
@@ -33,32 +36,62 @@ type Server struct {
 	CTX            context.Context
 }
 
-func New(layer *layers.Layer) *Server {
-	return &Server{
-		Layer: layer,
+func (x *Server) newUpgrade() *websocket.Upgrader {
+	u := websocket.NewUpgrader()
+	u.CheckOrigin = func(r *http.Request) bool { return true }
+	u.OnMessage(func(c *websocket.Conn, messageType websocket.MessageType, data []byte) {
+		if messageType == websocket.BinaryMessage {
+			//logger.Logger.Sugar().Debugf("rdata: %s", hex.EncodeToString(data))
+			if x.Config.VTun.Compress {
+				data, _ = snappy.Decode(nil, data)
+			}
+			if x.Config.VTun.Obfs {
+				data = cipher.XOR(data)
+			}
+			if key := utils.GetSrcKey(data); key != "" {
+				cache.GetCache().Set(key, c, 24*time.Hour)
+				x.convertSrcAddr(data)
+				x.WriteCallback(len(data))
+				x.WriteFunc(data)
+			}
+		}
+	})
+
+	u.OnClose(func(c *websocket.Conn, err error) {
+		logger.Logger.Sugar().Infof("OnClose: %s -> %v", c.RemoteAddr().String(), zap.Error(err))
+	})
+	return u
+}
+
+func (x *Server) onWebsocket(w http.ResponseWriter, r *http.Request) {
+	if !x.checkPermission(r) {
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte("forbidden"))
+		return
 	}
+	upgrade := x.newUpgrade()
+	conn, err := upgrade.Upgrade(w, r, nil)
+	if err != nil {
+		logger.Logger.Sugar().Errorf("upgrade error: %v", zap.Error(err))
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte("forbidden"))
+		return
+	}
+	//conn.SetReadDeadline(time.Time{})
+	logger.Logger.Sugar().Debugf("OnOpen: %s", conn.RemoteAddr().String())
 }
 
 // StartServerForApi starts the ws server
 func (x *Server) StartServerForApi() {
+	if !x.Config.VTun.Verbose {
+		logging.SetLevel(logging.LevelNone)
+	}
 	// server -> client
 	go x.toClient()
 	// client -> server
-	srv := http.NewServeMux()
-	srv.HandleFunc(x.Config.VTun.Path, func(w http.ResponseWriter, r *http.Request) {
-		if !x.checkPermission(w, r) {
-			logger.Logger.Error("[server] authentication failed")
-			return
-		}
-		conn, _, _, err := ws.UpgradeHTTP(r, w)
-		if err != nil {
-			logger.Logger.Error("[server] failed to upgrade http", zap.Error(err))
-			return
-		}
-		x.toServer(conn)
-	})
-
-	srv.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
+	mux := &http.ServeMux{}
+	mux.HandleFunc(x.Config.VTun.Path, x.onWebsocket)
+	mux.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Header().Set("Content-Type", "text/plain")
 		w.Header().Set("Content-Length", "6")
@@ -69,29 +102,57 @@ func (x *Server) StartServerForApi() {
 		w.Write([]byte(`follow`))
 	})
 
-	log.Printf("gofly ws server started on %v", x.Config.VTun.LocalAddr)
-	if x.Config.VTun.Protocol == "wss" && x.Config.VTun.TLSCertificateFilePath != "" && x.Config.VTun.TLSCertificateKeyFilePath != "" {
-		err := http.ListenAndServeTLS(x.Config.VTun.LocalAddr, x.Config.VTun.TLSCertificateFilePath, x.Config.VTun.TLSCertificateKeyFilePath, srv)
+	var svr *nbhttp.Server
+	if x.Config.VTun.Protocol == "wss" {
+		cert, err := tls.LoadX509KeyPair(x.Config.VTun.TLSCertificateFilePath, x.Config.VTun.TLSCertificateKeyFilePath)
 		if err != nil {
-			logger.Logger.Fatal("http listen Error", zap.Error(err))
+			log.Panic(err)
 		}
+		tlsConfig := &tls.Config{
+			Certificates:       []tls.Certificate{cert},
+			InsecureSkipVerify: x.Config.VTun.TLSInsecureSkipVerify,
+		}
+		if x.Config.VTun.TLSSni != "" {
+			tlsConfig.ServerName = x.Config.VTun.TLSSni
+		}
+		svr = nbhttp.NewServer(nbhttp.Config{
+			Network:   "tcp",
+			AddrsTLS:  []string{x.Config.VTun.LocalAddr},
+			TLSConfig: tlsConfig,
+			Handler:   mux,
+		})
 	} else {
-		err := http.ListenAndServe(x.Config.VTun.LocalAddr, srv)
-		if err != nil {
-			logger.Logger.Fatal("http listen Error", zap.Error(err))
-		}
+		svr = nbhttp.NewServer(nbhttp.Config{
+			Network: "tcp",
+			Addrs:   []string{x.Config.VTun.LocalAddr},
+			Handler: mux,
+		})
 	}
+
+	err := svr.Start()
+	if err != nil {
+		logger.Logger.Sugar().Errorf("nbio.Start failed: %v", zap.Error(err))
+		return
+	}
+	defer svr.Stop()
+
+	logger.Logger.Sugar().Infof("gofly %s server started on %v", x.Config.VTun.Protocol, x.Config.VTun.LocalAddr)
+
+	interrupt := make(chan os.Signal, 1)
+	signal.Notify(interrupt, os.Interrupt)
+	<-interrupt
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+	defer cancel()
+	svr.Shutdown(ctx)
 }
 
 // checkPermission checks the permission of the request
-func (x *Server) checkPermission(w http.ResponseWriter, req *http.Request) bool {
+func (x *Server) checkPermission(req *http.Request) bool {
 	if x.Config.VTun.Key == "" {
 		return true
 	}
 	key := req.Header.Get("key")
 	if key != x.Config.VTun.Key {
-		w.WriteHeader(http.StatusForbidden)
-		w.Write([]byte("No permission"))
 		return false
 	}
 	return true
@@ -110,8 +171,9 @@ func (x *Server) toClient() {
 			continue
 		}
 		b := packet[:n]
+		//logger.Logger.Sugar().Debugf("wdata: %s", hex.EncodeToString(b))
 		x.convertDstAddr(b)
-		if key := netutil.GetDstKey(b); key != "" {
+		if key := utils.GetDstKey(b); key != "" {
 			if v, ok := cache.GetCache().Get(key); ok {
 				if x.Config.VTun.Obfs {
 					b = cipher.XOR(b)
@@ -119,8 +181,10 @@ func (x *Server) toClient() {
 				if x.Config.VTun.Compress {
 					b = snappy.Encode(nil, b)
 				}
-				err := wsutil.WriteServerBinary(v.(net.Conn), b)
+				conn := v.(*websocket.Conn)
+				err = conn.WriteMessage(websocket.BinaryMessage, b)
 				if err != nil {
+					logger.Logger.Error("write data error", zap.Error(err))
 					cache.GetCache().Delete(key)
 					continue
 				}
@@ -217,38 +281,6 @@ func (x *Server) convertSrcAddr(packet []byte) {
 			dstAddr := ipv6.ParseDstIcmpTag(packet, false) // dst ip
 			x.Layer.V6Layer.ReplaceSrcAddrIcmp(packet, dstAddr, srcAddr)
 			ipv6.CalcICMPCheckSum(packet)
-		}
-	}
-}
-
-// toServer sends data to server
-func (x *Server) toServer(conn net.Conn) {
-	defer conn.Close()
-	for contextOpened(x.CTX) {
-		b, op, err := wsutil.ReadClientData(conn)
-		if err != nil {
-			logger.Logger.Error("ReadClientData Error", zap.Error(err))
-			break
-		}
-		if op == ws.OpText {
-			err := wsutil.WriteServerMessage(conn, op, b)
-			if err != nil {
-				logger.Logger.Error("WriteServerMessage Error", zap.Error(err))
-				return
-			}
-		} else if op == ws.OpBinary {
-			if x.Config.VTun.Compress {
-				b, _ = snappy.Decode(nil, b)
-			}
-			if x.Config.VTun.Obfs {
-				b = cipher.XOR(b)
-			}
-			if key := netutil.GetSrcKey(b); key != "" {
-				cache.GetCache().Set(key, conn, 24*time.Hour)
-				x.convertSrcAddr(b)
-				x.WriteCallback(len(b))
-				x.WriteFunc(b)
-			}
 		}
 	}
 }

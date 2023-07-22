@@ -170,6 +170,10 @@ func (x *NatMap) CreateIcmp(srcAddr *ICMPPair, dstAddr *ICMPPair) *ICMPPair {
 
 func (x *NatMap) CreateTcp(srcAddr *net.TCPAddr, ip net.IP) *net.TCPAddr {
 	var dstAddr = NewTcp(ip, x._tcpPort)
+	if x.ReserveTcp(dstAddr) != nil {
+		x._tcpPort = (x._tcpPort + 1) % 65535
+		return x.CreateTcp(srcAddr, ip)
+	}
 	x.AppendTcp(srcAddr, dstAddr)
 	x._tcpPort = (x._tcpPort + 1) % 65535
 	return dstAddr
@@ -177,6 +181,10 @@ func (x *NatMap) CreateTcp(srcAddr *net.TCPAddr, ip net.IP) *net.TCPAddr {
 
 func (x *NatMap) CreateUdp(srcAddr *net.UDPAddr, ip net.IP) *net.UDPAddr {
 	var dstAddr = NewUdp(ip, x._udpPort)
+	if x.ReserveUdp(dstAddr) != nil {
+		x._udpPort = (x._udpPort + 1) % 65535
+		return x.CreateUdp(srcAddr, ip)
+	}
 	x.AppendUdp(srcAddr, dstAddr)
 	x._udpPort = (x._udpPort + 1) % 65535
 	return dstAddr

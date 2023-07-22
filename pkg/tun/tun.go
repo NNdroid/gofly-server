@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"github.com/net-byte/vtun/common/xchan"
 	"io"
+	"log"
 	"net"
 	"net/netip"
 	"os"
@@ -139,11 +140,42 @@ func (tun *NetTun) Read(buf [][]byte, sizes []int, offset int) (int, error) {
 	return 1, nil
 }
 
+const IPv4HeaderLen = 20
+const IPv6HeaderLen = 40
+const IPv4offsetTotalLength = 2
+const IPv6offsetPayloadLength = 4
+
 // Write to WireGuard
 func (tun *NetTun) Write(buf [][]byte, offset int) (int, error) {
 	for _, buf := range buf {
 		packet := buf[offset:]
 		if len(packet) == 0 {
+			continue
+		}
+		switch packet[0] >> 4 {
+		case 4:
+			if len(packet) < IPv4HeaderLen {
+				continue
+			}
+			field := packet[IPv4offsetTotalLength : IPv4offsetTotalLength+2]
+			length := binary.BigEndian.Uint16(field)
+			if int(length) > len(packet) || int(length) < IPv4HeaderLen {
+				continue
+			}
+			packet = packet[:length]
+		case 6:
+			if len(packet) < IPv6HeaderLen {
+				continue
+			}
+			field := packet[IPv6offsetPayloadLength : IPv6offsetPayloadLength+2]
+			length := binary.BigEndian.Uint16(field)
+			length += IPv6HeaderLen
+			if int(length) > len(packet) {
+				continue
+			}
+			packet = packet[:length]
+		default:
+			log.Printf("Packet with invalid IP version from %v", packet[0])
 			continue
 		}
 		//log.Printf("Write: %v\n", packet)
