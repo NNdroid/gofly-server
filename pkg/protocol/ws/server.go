@@ -6,7 +6,9 @@ import (
 	"github.com/lesismal/nbio/logging"
 	"github.com/lesismal/nbio/nbhttp"
 	"github.com/lesismal/nbio/nbhttp/websocket"
+	"github.com/patrickmn/go-cache"
 	"go.uber.org/zap"
+	"gofly/pkg/cipher"
 	"gofly/pkg/config"
 	"gofly/pkg/layers"
 	"gofly/pkg/layers/ipv4"
@@ -22,8 +24,6 @@ import (
 	"github.com/golang/snappy"
 
 	"github.com/lesismal/llib/std/crypto/tls"
-	"github.com/net-byte/vtun/common/cache"
-	"github.com/net-byte/vtun/common/cipher"
 )
 
 type Server struct {
@@ -35,6 +35,7 @@ type Server struct {
 	WriteCallback  func(int)
 	WriteToTunFunc func(buf []byte) (int, error)
 	CTX            context.Context
+	cache          *cache.Cache
 }
 
 func (x *Server) newUpgrade() *websocket.Upgrader {
@@ -60,7 +61,7 @@ func (x *Server) newUpgrade() *websocket.Upgrader {
 				data = cipher.XOR(data)
 			}
 			if key := utils.GetSrcKey(data); key != "" {
-				cache.GetCache().Set(key, c, 24*time.Hour)
+				x.cache.Set(key, c, 24*time.Hour)
 				x.convertSrcAddr(data)
 				x.WriteCallback(len(data))
 				x.WriteFunc(data)
@@ -97,6 +98,8 @@ func (x *Server) StartServerForApi() {
 	if !x.Config.VTun.Verbose {
 		logging.SetLevel(logging.LevelNone)
 	}
+	x.cache = cache.New(15*time.Minute, 24*time.Hour)
+	cipher.SetKey(x.Config.VTun.Key)
 	// server -> client
 	go x.toClient()
 	// client -> server
@@ -184,7 +187,7 @@ func (x *Server) toClient() {
 		b := packet[:n]
 		x.convertDstAddr(b)
 		if key := utils.GetDstKey(b); key != "" {
-			if v, ok := cache.GetCache().Get(key); ok {
+			if v, ok := x.cache.Get(key); ok {
 				if x.Config.VTun.Obfs {
 					b = cipher.XOR(b)
 				}
@@ -195,7 +198,7 @@ func (x *Server) toClient() {
 				err = conn.WriteMessage(websocket.BinaryMessage, b)
 				if err != nil {
 					logger.Logger.Error("write data error", zap.Error(err))
-					cache.GetCache().Delete(key)
+					x.cache.Delete(key)
 					continue
 				}
 				x.ReadCallback(n)

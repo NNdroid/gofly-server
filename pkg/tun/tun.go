@@ -7,7 +7,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/net-byte/vtun/common/xchan"
+	"gofly/pkg/xchan"
 	"io"
 	"log"
 	"net"

@@ -2,14 +2,14 @@ module gofly
 
 go 1.20
 
-replace github.com/net-byte/vtun => ../vtun
+//replace github.com/net-byte/vtun => ../vtun
 
 require (
 	github.com/gin-gonic/gin v1.9.1
 	github.com/golang/snappy v0.0.4
 	github.com/lesismal/llib v1.1.12
 	github.com/lesismal/nbio v1.3.17
-	github.com/net-byte/vtun v0.0.0-00010101000000-000000000000
+	//github.com/net-byte/vtun v0.0.0-00010101000000-000000000000
 	github.com/patrickmn/go-cache v2.1.0+incompatible
 	go.uber.org/zap v1.24.0
 	golang.org/x/net v0.12.0
