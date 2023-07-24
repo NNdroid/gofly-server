@@ -6,7 +6,7 @@ import (
 	"strconv"
 )
 
-const HeaderLength = 40
+const IPHeaderLength = 40
 
 var ProtocolMap = map[int]string{
 	41: "ipv6",  //IPV6头部
@@ -80,7 +80,7 @@ func WritePort(header []byte, length int) {
 
 func ParseSrcTcp(b []byte) *net.TCPAddr {
 	ip := GetSrcAddr(b)
-	port := ReadPort(b[HeaderLength+0 : HeaderLength+2])
+	port := ReadPort(b[IPHeaderLength+0 : IPHeaderLength+2])
 	return &net.TCPAddr{
 		IP:   ip,
 		Port: port,
@@ -89,7 +89,7 @@ func ParseSrcTcp(b []byte) *net.TCPAddr {
 
 func ParseSrcUdp(b []byte) *net.UDPAddr {
 	ip := GetSrcAddr(b)
-	port := ReadPort(b[HeaderLength+0 : HeaderLength+2])
+	port := ReadPort(b[IPHeaderLength+0 : IPHeaderLength+2])
 	return &net.UDPAddr{
 		IP:   ip,
 		Port: port,
@@ -98,7 +98,7 @@ func ParseSrcUdp(b []byte) *net.UDPAddr {
 
 func ParseDstTcp(b []byte) *net.TCPAddr {
 	ip := GetDstAddr(b)
-	port := ReadPort(b[HeaderLength+2 : HeaderLength+4])
+	port := ReadPort(b[IPHeaderLength+2 : IPHeaderLength+4])
 	return &net.TCPAddr{
 		IP:   ip,
 		Port: port,
@@ -107,7 +107,7 @@ func ParseDstTcp(b []byte) *net.TCPAddr {
 
 func ParseDstUdp(b []byte) *net.UDPAddr {
 	ip := GetDstAddr(b)
-	port := ReadPort(b[HeaderLength+2 : HeaderLength+4])
+	port := ReadPort(b[IPHeaderLength+2 : IPHeaderLength+4])
 	return &net.UDPAddr{
 		IP:   ip,
 		Port: port,
@@ -132,7 +132,7 @@ func (x *V6Layer) ReplaceSrcAddrTcp(b []byte, addr *net.TCPAddr) {
 	reverseAddr := x.NatTable.CreateCheckTcp(addr, x.ReverseIP, false)
 	if reverseAddr != nil {
 		copy(b[8:24], reverseAddr.IP.To16()[:])
-		WritePort(b[HeaderLength+0:HeaderLength+2], reverseAddr.Port)
+		WritePort(b[IPHeaderLength+0:IPHeaderLength+2], reverseAddr.Port)
 	}
 }
 
@@ -140,7 +140,7 @@ func (x *V6Layer) ReplaceSrcAddrUdp(b []byte, addr *net.UDPAddr) {
 	reverseAddr := x.NatTable.CreateCheckUdp(addr, x.ReverseIP, false)
 	if reverseAddr != nil {
 		copy(b[8:24], reverseAddr.IP.To16()[:])
-		WritePort(b[HeaderLength+0:HeaderLength+2], reverseAddr.Port)
+		WritePort(b[IPHeaderLength+0:IPHeaderLength+2], reverseAddr.Port)
 	}
 }
 
@@ -148,7 +148,7 @@ func (x *V6Layer) ReplaceDstAddrTcp(b []byte, addr *net.TCPAddr) {
 	reverseAddr := x.NatTable.CreateCheckTcp(addr, x.ReverseIP, true)
 	if reverseAddr != nil {
 		copy(b[24:40], reverseAddr.IP.To16()[:])
-		WritePort(b[HeaderLength+2:HeaderLength+4], reverseAddr.Port)
+		WritePort(b[IPHeaderLength+2:IPHeaderLength+4], reverseAddr.Port)
 	}
 }
 
@@ -156,7 +156,7 @@ func (x *V6Layer) ReplaceDstAddrUdp(b []byte, addr *net.UDPAddr) {
 	reverseAddr := x.NatTable.CreateCheckUdp(addr, x.ReverseIP, true)
 	if reverseAddr != nil {
 		copy(b[24:40], reverseAddr.IP.To16()[:])
-		WritePort(b[HeaderLength+2:HeaderLength+4], reverseAddr.Port)
+		WritePort(b[IPHeaderLength+2:IPHeaderLength+4], reverseAddr.Port)
 	}
 }
 
@@ -166,12 +166,15 @@ func GetPayloadLength(b []byte) int {
 }
 
 func CalcUDPCheckSum(packet []byte) {
-	payloadLen := GetPayloadLength(packet) //116 v
-	if len(packet) < HeaderLength+payloadLen {
+	if len(packet) < IPHeaderLength {
 		return
 	}
-	packet[HeaderLength+6] = 0x00
-	packet[HeaderLength+7] = 0x00
+	payloadLen := GetPayloadLength(packet) //116 v
+	if len(packet) < IPHeaderLength+payloadLen {
+		return
+	}
+	packet[IPHeaderLength+6] = 0x00
+	packet[IPHeaderLength+7] = 0x00
 	result := 0
 	result += ReadPort(packet[8:10]) //src 16*8
 	result += ReadPort(packet[10:12])
@@ -192,28 +195,31 @@ func CalcUDPCheckSum(packet []byte) {
 	result += ReadPort([]byte{0x00, 0x11}) // zero + PTCL
 	tl1 := byte((payloadLen & 0xff00) >> 8)
 	tl2 := byte(payloadLen & 0x00ff)
-	result += ReadPort([]byte{tl1, tl2})        // udp length 150133
-	l := ((HeaderLength + payloadLen) % 2) == 1 // false
+	result += ReadPort([]byte{tl1, tl2})          // udp length 150133
+	l := ((IPHeaderLength + payloadLen) % 2) == 1 // false
 	n := payloadLen / 2
 	for i := 0; i < n; i++ {
-		result += ReadPort(packet[HeaderLength+i*2 : HeaderLength+i*2+2])
+		result += ReadPort(packet[IPHeaderLength+i*2 : IPHeaderLength+i*2+2])
 	}
 	if l {
-		result += (int(packet[HeaderLength+payloadLen-1]) << 8) & 0xff00
+		result += (int(packet[IPHeaderLength+payloadLen-1]) << 8) & 0xff00
 	}
 	hl := ((result & 0xffff0000) >> 16) & 0x0000ffff
 	ll := result & 0x0000ffff
 	x := hl + ll
-	WritePort(packet[HeaderLength+6:HeaderLength+8], 0xffff-x)
+	WritePort(packet[IPHeaderLength+6:IPHeaderLength+8], 0xffff-x)
 }
 
 func CalcTCPCheckSum(packet []byte) {
-	payloadLen := GetPayloadLength(packet) //116 v
-	if len(packet) < HeaderLength+payloadLen {
+	if len(packet) < IPHeaderLength {
 		return
 	}
-	packet[HeaderLength+16] = 0x00
-	packet[HeaderLength+17] = 0x00
+	payloadLen := GetPayloadLength(packet) //116 v
+	if len(packet) < IPHeaderLength+payloadLen {
+		return
+	}
+	packet[IPHeaderLength+16] = 0x00
+	packet[IPHeaderLength+17] = 0x00
 	result := 0
 	result += ReadPort(packet[8:10]) //src 16*8
 	result += ReadPort(packet[10:12])
@@ -234,28 +240,31 @@ func CalcTCPCheckSum(packet []byte) {
 	result += ReadPort([]byte{0x00, 0x06}) // zero + PTCL
 	tl1 := byte((payloadLen & 0xff00) >> 8)
 	tl2 := byte(payloadLen & 0x00ff)
-	result += ReadPort([]byte{tl1, tl2})        // tcp length 150133
-	l := ((HeaderLength + payloadLen) % 2) == 1 // false
+	result += ReadPort([]byte{tl1, tl2})          // tcp length 150133
+	l := ((IPHeaderLength + payloadLen) % 2) == 1 // false
 	n := payloadLen / 2
 	for i := 0; i < n; i++ {
-		result += ReadPort(packet[HeaderLength+i*2 : HeaderLength+i*2+2])
+		result += ReadPort(packet[IPHeaderLength+i*2 : IPHeaderLength+i*2+2])
 	}
 	if l {
-		result += (int(packet[HeaderLength+payloadLen-1]) << 8) & 0xff00
+		result += (int(packet[IPHeaderLength+payloadLen-1]) << 8) & 0xff00
 	}
 	hl := ((result & 0xffff0000) >> 16) & 0x0000ffff
 	ll := result & 0x0000ffff
 	x := hl + ll
-	WritePort(packet[HeaderLength+16:HeaderLength+18], 0xffff-x)
+	WritePort(packet[IPHeaderLength+16:IPHeaderLength+18], 0xffff-x)
 }
 
 func CalcICMPCheckSum(packet []byte) {
-	payloadLen := GetPayloadLength(packet) //116 v
-	if len(packet) < HeaderLength+payloadLen {
+	if len(packet) < IPHeaderLength {
 		return
 	}
-	packet[HeaderLength+2] = 0x00
-	packet[HeaderLength+3] = 0x00
+	payloadLen := GetPayloadLength(packet) //116 v
+	if len(packet) < IPHeaderLength+payloadLen {
+		return
+	}
+	packet[IPHeaderLength+2] = 0x00
+	packet[IPHeaderLength+3] = 0x00
 	result := 0
 	result += ReadPort(packet[8:10]) //src 16*8
 	result += ReadPort(packet[10:12])
@@ -276,28 +285,28 @@ func CalcICMPCheckSum(packet []byte) {
 	result += ReadPort([]byte{0x00, 0x3a}) // zero + PTCL
 	tl1 := byte((payloadLen & 0xff00) >> 8)
 	tl2 := byte(payloadLen & 0x00ff)
-	result += ReadPort([]byte{tl1, tl2})        // icmpv6 length 150133
-	l := ((HeaderLength + payloadLen) % 2) == 1 // false
+	result += ReadPort([]byte{tl1, tl2})          // icmpv6 length 150133
+	l := ((IPHeaderLength + payloadLen) % 2) == 1 // false
 	n := payloadLen / 2
 	for i := 0; i < n; i++ {
-		result += ReadPort(packet[HeaderLength+i*2 : HeaderLength+i*2+2])
+		result += ReadPort(packet[IPHeaderLength+i*2 : IPHeaderLength+i*2+2])
 	}
 	if l {
-		result += (int(packet[HeaderLength+payloadLen-1]) << 8) & 0xff00
+		result += (int(packet[IPHeaderLength+payloadLen-1]) << 8) & 0xff00
 	}
 	hl := ((result & 0xffff0000) >> 16) & 0x0000ffff
 	ll := result & 0x0000ffff
 	x := hl + ll
-	WritePort(packet[HeaderLength+2:HeaderLength+4], 0xffff-x)
+	WritePort(packet[IPHeaderLength+2:IPHeaderLength+4], 0xffff-x)
 }
 
 func ParseSrcIcmpTag(b []byte, dstMode bool) *natmap.ICMPPair {
 	var result natmap.ICMPPair
 	result.IP = GetSrcAddr(b)
 	if dstMode {
-		result.Tag = ReadPort(b[HeaderLength+4 : HeaderLength+6])
+		result.Tag = ReadPort(b[IPHeaderLength+4 : IPHeaderLength+6])
 	} else {
-		result.Tag = ReadPort(b[HeaderLength : HeaderLength+2])
+		result.Tag = ReadPort(b[IPHeaderLength : IPHeaderLength+2])
 	}
 	return &result
 }
@@ -306,9 +315,9 @@ func ParseDstIcmpTag(b []byte, dstMode bool) *natmap.ICMPPair {
 	var result natmap.ICMPPair
 	result.IP = GetDstAddr(b)
 	if dstMode {
-		result.Tag = ReadPort(b[HeaderLength : HeaderLength+2])
+		result.Tag = ReadPort(b[IPHeaderLength : IPHeaderLength+2])
 	} else {
-		result.Tag = ReadPort(b[HeaderLength+4 : HeaderLength+6])
+		result.Tag = ReadPort(b[IPHeaderLength+4 : IPHeaderLength+6])
 	}
 	return &result
 }

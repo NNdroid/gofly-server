@@ -159,6 +159,9 @@ func GetPayloadLength(b []byte) int {
 }
 
 func CalcUDPCheckSum(packet []byte) {
+	if len(packet) < IPHeaderLengthMinimum {
+		return
+	}
 	ip4HeaderLen := GetHeaderLength(packet)   // 20 v
 	ip4PayloadLen := GetPayloadLength(packet) //116 v
 	if len(packet) < ip4HeaderLen+ip4PayloadLen {
@@ -190,6 +193,9 @@ func CalcUDPCheckSum(packet []byte) {
 }
 
 func CalcTCPCheckSum(packet []byte) {
+	if len(packet) < IPHeaderLengthMinimum {
+		return
+	}
 	ip4HeaderLen := GetHeaderLength(packet)   // 20 v
 	ip4PayloadLen := GetPayloadLength(packet) //116 v
 	if len(packet) < ip4HeaderLen+ip4PayloadLen {
@@ -220,11 +226,19 @@ func CalcTCPCheckSum(packet []byte) {
 	WritePort(packet[ip4HeaderLen+16:ip4HeaderLen+18], 0xffff-x)
 }
 
+const IPHeaderLengthMinimum = 20
+
 func CalcIPCheckSum(packet []byte) {
+	if len(packet) < IPHeaderLengthMinimum {
+		return
+	}
 	packet[10] = 0x00
 	packet[11] = 0x00
 	result := ReadPort(packet[10:12])
 	ip4HeaderLen := GetHeaderLength(packet)
+	if len(packet) < ip4HeaderLen {
+		return
+	}
 	l := (ip4HeaderLen % 2) == 1
 	n := ip4HeaderLen / 2
 	for i := 0; i < n; i++ {
@@ -240,14 +254,17 @@ func CalcIPCheckSum(packet []byte) {
 }
 
 func CalcICMPCheckSum(packet []byte) {
+	if len(packet) < IPHeaderLengthMinimum {
+		return
+	}
 	result := 0
 	ip4HeaderLen := GetHeaderLength(packet)
-	packet[ip4HeaderLen+2] = 0x00
-	packet[ip4HeaderLen+3] = 0x00
 	ip4PayloadLen := GetPayloadLength(packet)
 	if len(packet) < ip4HeaderLen+ip4PayloadLen {
 		return
 	}
+	packet[ip4HeaderLen+2] = 0x00
+	packet[ip4HeaderLen+3] = 0x00
 	l := (ip4PayloadLen % 2) == 1
 	n := ip4PayloadLen / 2
 	for i := 0; i < n; i++ {

@@ -3,6 +3,7 @@ package ws
 import (
 	"context"
 	"errors"
+	"github.com/gin-gonic/gin"
 	"github.com/lesismal/nbio/logging"
 	"github.com/lesismal/nbio/nbhttp"
 	"github.com/lesismal/nbio/nbhttp/websocket"
@@ -14,6 +15,7 @@ import (
 	"gofly/pkg/layers/ipv4"
 	"gofly/pkg/layers/ipv6"
 	"gofly/pkg/logger"
+	"gofly/pkg/statistics"
 	"gofly/pkg/utils"
 	"log"
 	"net/http"
@@ -26,16 +28,17 @@ import (
 	"github.com/lesismal/llib/std/crypto/tls"
 )
 
+const AuthFieldKey = "key"
+
 type Server struct {
-	Layer          *layers.Layer
-	Config         *config.Config
-	ReadFunc       func([]byte) (int, error)
-	ReadCallback   func(int)
-	WriteFunc      func([]byte) int
-	WriteCallback  func(int)
-	WriteToTunFunc func(buf []byte) (int, error)
-	CTX            context.Context
-	cache          *cache.Cache
+	Layer           *layers.Layer
+	Config          *config.Config
+	ReadFunc        func([]byte) (int, error)
+	WriteFunc       func([]byte) int
+	WriteToTunFunc  func(buf []byte) (int, error)
+	CTX             context.Context
+	connectionCache *cache.Cache
+	Statistics      *statistics.Statistics
 }
 
 func (x *Server) newUpgrade() *websocket.Upgrader {
@@ -54,6 +57,8 @@ func (x *Server) newUpgrade() *websocket.Upgrader {
 	})
 	u.OnMessage(func(c *websocket.Conn, messageType websocket.MessageType, data []byte) {
 		if messageType == websocket.BinaryMessage {
+			n := len(data)
+			x.Statistics.IncrReceivedBytes(n)
 			if x.Config.VTun.Compress {
 				data, _ = snappy.Decode(nil, data)
 			}
@@ -61,15 +66,16 @@ func (x *Server) newUpgrade() *websocket.Upgrader {
 				data = cipher.XOR(data)
 			}
 			if key := utils.GetSrcKey(data); key != "" {
-				x.cache.Set(key, c, 24*time.Hour)
+				x.connectionCache.Set(key, c, 24*time.Hour)
 				x.convertSrcAddr(data)
-				x.WriteCallback(len(data))
 				x.WriteFunc(data)
+				x.Statistics.IncrClientTransportBytes(c.RemoteAddr(), n)
 			}
 		}
 	})
 
 	u.OnClose(func(c *websocket.Conn, err error) {
+		x.Statistics.Remove(c.RemoteAddr())
 		logger.Logger.Sugar().Debugf("closed: %s -> %v", c.RemoteAddr().String(), zap.Error(err))
 	})
 	return u
@@ -90,6 +96,7 @@ func (x *Server) onWebsocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	//conn.SetReadDeadline(time.Time{})
+	x.Statistics.Push(conn.RemoteAddr())
 	logger.Logger.Sugar().Debugf("open: %s", conn.RemoteAddr().String())
 }
 
@@ -97,8 +104,9 @@ func (x *Server) onWebsocket(w http.ResponseWriter, r *http.Request) {
 func (x *Server) StartServerForApi() {
 	if !x.Config.VTun.Verbose {
 		logging.SetLevel(logging.LevelNone)
+		gin.SetMode(gin.ReleaseMode)
 	}
-	x.cache = cache.New(15*time.Minute, 24*time.Hour)
+	x.connectionCache = cache.New(15*time.Minute, 24*time.Hour)
 	cipher.SetKey(x.Config.VTun.Key)
 	// server -> client
 	go x.toClient()
@@ -161,12 +169,14 @@ func (x *Server) StartServerForApi() {
 }
 
 // checkPermission checks the permission of the request
+// Validation is successful if the header or request parameters contain specific data.
 func (x *Server) checkPermission(req *http.Request) bool {
 	if x.Config.VTun.Key == "" {
 		return true
 	}
-	key := req.Header.Get("key")
-	if key != x.Config.VTun.Key {
+	key1 := req.Header.Get(AuthFieldKey)
+	key2 := req.URL.Query().Get(AuthFieldKey)
+	if key1 != x.Config.VTun.Key && key2 != x.Config.VTun.Key {
 		return false
 	}
 	return true
@@ -187,21 +197,23 @@ func (x *Server) toClient() {
 		b := packet[:n]
 		x.convertDstAddr(b)
 		if key := utils.GetDstKey(b); key != "" {
-			if v, ok := x.cache.Get(key); ok {
+			if v, ok := x.connectionCache.Get(key); ok {
 				if x.Config.VTun.Obfs {
 					b = cipher.XOR(b)
 				}
 				if x.Config.VTun.Compress {
 					b = snappy.Encode(nil, b)
 				}
+				ns := len(b)
 				conn := v.(*websocket.Conn)
 				err = conn.WriteMessage(websocket.BinaryMessage, b)
 				if err != nil {
 					logger.Logger.Error("write data error", zap.Error(err))
-					x.cache.Delete(key)
+					x.connectionCache.Delete(key)
 					continue
 				}
-				x.ReadCallback(n)
+				x.Statistics.IncrTransportBytes(ns)
+				x.Statistics.IncrClientReceivedBytes(conn.RemoteAddr(), ns)
 			}
 		}
 	}

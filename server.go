@@ -12,6 +12,7 @@ import (
 	"gofly/pkg/layers/ipv6"
 	"gofly/pkg/logger"
 	"gofly/pkg/protocol/ws"
+	"gofly/pkg/statistics"
 	ct "gofly/pkg/tun"
 	"gofly/pkg/utils"
 	tun2 "golang.zx2c4.com/wireguard/tun"
@@ -33,6 +34,7 @@ var cancel context.CancelFunc
 var ti tun2.Device
 var tNet *ct.Net
 var layer *layers.Layer
+var stats *statistics.Statistics
 
 func parseAddr(address []string) []netip.Addr {
 	var result []netip.Addr
@@ -82,15 +84,15 @@ func StartServer(config *config.Config) {
 	go ReadTunSync(config)
 	//go RunHttpClient()
 	go RunLocalHttpServer()
+	stats = &statistics.Statistics{}
 	server := &ws.Server{
 		Layer:          layer,
 		Config:         config,
 		ReadFunc:       ReadFromWireGuard,
-		ReadCallback:   func(i int) {},
 		WriteFunc:      WriteToWireGuard,
-		WriteCallback:  func(i int) {},
 		WriteToTunFunc: WriteToTun,
 		CTX:            _ctx,
+		Statistics:     stats,
 	}
 	//websocket server
 	server.StartServerForApi()
@@ -146,16 +148,31 @@ func RunLocalHttpServer() {
 	}
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
-	r.GET("/ping", func(c *gin.Context) {
+	g1 := r.Group("/api/v1")
+	g1.GET("/ping", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"message": "pong",
 		})
 	})
-	r.GET("/myip", func(c *gin.Context) {
+	g1.GET("/myinfo", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"connection": c.Request.RemoteAddr,
 			"user-agent": c.Request.UserAgent(),
 			"ip":         c.ClientIP(),
+		})
+	})
+	g1.GET("/online/count", func(c *gin.Context) {
+		c.String(http.StatusOK, strconv.Itoa(stats.OnlineClientCount))
+	})
+	g1.GET("/traffic", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"rx": stats.RX,
+			"tx": stats.TX,
+		})
+	})
+	g1.GET("/online/clients", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"data": stats.ClientList,
 		})
 	})
 	r.GET("/", func(c *gin.Context) {
