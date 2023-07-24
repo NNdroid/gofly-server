@@ -6,6 +6,7 @@
     <title>DashBoard - GoFly Server</title>
 <!--    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/zui/1.10.0/css/zui.min.css">-->
     <link rel="stylesheet" href="./css/zui.min.css">
+    <link rel="stylesheet" href="./css/index.css">
 </head>
 <body>
     <div class="container">
@@ -13,6 +14,11 @@
         <h3>:)   this is vpn gateway!</h3>
         <hr/>
         <h2>Traffic</h2>
+        <div class="traffic_total">
+            <div class="item"><p class="label">DOWNLOAD</p><p class="total" id="traffic_total_rx">300GB</p></div>
+            <div class="item"><p class="label">UPLOAD</p><p class="total" id="traffic_total_tx">100GB</p></div>
+        </div>
+        <hr/>
         <div>
             <canvas id="traffic_chart"></canvas>
         </div>
@@ -21,6 +27,23 @@
         <p>Number of online devices: <span id="online_client_count">3</span></p>
         <p>Your client IP: <span id="your_client_ip">1.1.1.1</span></p>
 <!--        <p>You are from: <span id="your_are_from">1.1.1.1:8098</span></p>-->
+        <hr/>
+        <h2>Client List</h2>
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>Addr</th>
+                        <th>Online Time</th>
+                        <th>Offline Time</th>
+                        <th>upload</th>
+                        <th>download</th>
+                    </tr>
+                </thead>
+                <tbody id="table_client_list">
+                </tbody>
+            </table>
+        </div>
         <hr/>
         <footer>
             &copy follow 2023
@@ -32,113 +55,6 @@
 <!--    <script src="https://cdnjs.cloudflare.com/ajax/libs/zui/1.10.0/js/zui.min.js"></script>-->
 <!--    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>-->
 <!--    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>-->
-    <script>
-        const ctx = document.getElementById('traffic_chart');
-        var trafficData = {
-            type: 'line',
-            data: {
-                labels: [],
-                datasets: [
-                    {
-                        label: 'download',
-                        data: [],
-                        borderWidth: 1
-                    },
-                    {
-                        label: 'upload',
-                        data: [],
-                        borderWidth: 1
-                    }
-                ]
-            },
-            options: {
-                scales: {
-                    y: {
-                        beginAtZero: true,
-                        ticks: {
-                            callback: function(value) {
-                                return getFriendlyByteString(value)
-                            }
-                        }
-                    }
-                }
-            }
-        };
-
-        const trafficChart = new Chart(ctx, trafficData);
-
-        updateYourInfo()
-
-        var currentTrafficRX = 0
-        var currentTrafficTX = 0
-        setInterval(updateTrafficData, 1000, trafficChart, trafficData)
-        setInterval(updateOnlineClientCount, 1000)
-
-
-        function updateYourInfo() {
-            const yourClientIPElement = document.getElementById('your_client_ip');
-            // const yourAreFromElement = document.getElementById('your_are_from');
-            fetch('/api/v1/myinfo')
-                .then(r => r.json())
-                .then(r => {
-                    yourClientIPElement.innerText = r.ip
-                    // yourAreFromElement.innerText = r.connection
-                })
-                .catch(err => {
-                    new $.zui.Messager(err,{}).show();
-                })
-        }
-
-        function updateOnlineClientCount() {
-            const clientCountElement = document.getElementById('online_client_count');
-            fetch('/api/v1/online/count')
-                .then(r => r.text())
-                .then(n => {
-                    clientCountElement.innerHTML = `<span>${n}</span>`
-                })
-                .catch(err => {
-                    new $.zui.Messager(err,{}).show();
-                })
-        }
-
-        function updateTrafficData(chart, data) {
-            fetch('/api/v1/traffic')
-                .then(r => r.json())
-                .then(r => {
-                    let diffRX = currentTrafficRX !== 0 ? r.rx - currentTrafficRX : 0
-                    let diffTX = currentTrafficTX !== 0 ? r.tx - currentTrafficTX : 0
-                    data.data.labels.push(getNowTime())
-                    data.data.datasets[0].data.push(diffTX)
-                    data.data.datasets[1].data.push(diffRX)
-                    chart.update()
-                    currentTrafficRX = r.rx
-                    currentTrafficTX = r.tx
-                })
-                .catch(err => {
-                    new $.zui.Messager(err,{}).show();
-                })
-        }
-
-        function getNowTime() {
-            const date = new Date();
-            return `${date.getHours()}:${date.getMinutes()}:${date.getSeconds()}`
-        }
-
-        function convertUnitToMbs(n) {
-            return (n * 8 / 1024 / 1024).toFixed(3)
-        }
-
-        function getFriendlyByteString(n) {
-            if (n < 1024) {
-                return `${n*8}bps`
-            } else if (n < 1024 * 1024) {
-                return (n / 1024 * 8).toFixed(3)+"Kbps"
-            } else if (n < 1024 * 1024 * 1024) {
-                return (n / 1024 / 1024 * 8).toFixed(3)+"Mbps"
-            } else if (n < 1024 * 1024 * 1024 * 1024) {
-                return (n / 1024 / 1024 / 1024 * 8).toFixed(3)+"Gbps"
-            }
-        }
-    </script>
+    <script src="./js/index.js"></script>
 </body>
 </html>

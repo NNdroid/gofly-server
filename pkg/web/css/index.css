@@ -1,0 +1,10 @@
+.traffic_total {
+    column-count: 2;
+}
+
+.traffic_total > .item > .total {
+    padding: 10px;
+    font-size: 30px;
+    font-weight: bold;
+    color: #0a67fb;
+}
