@@ -3,6 +3,7 @@ package gofly
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -15,6 +16,7 @@ import (
 	"gofly/pkg/statistics"
 	ct "gofly/pkg/tun"
 	"gofly/pkg/utils"
+	"gofly/pkg/web"
 	tun2 "golang.zx2c4.com/wireguard/tun"
 	"io"
 	"log"
@@ -22,6 +24,7 @@ import (
 	"net/http"
 	"net/netip"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -147,7 +150,8 @@ func RunLocalHttpServer() {
 		log.Panicln(err)
 	}
 	gin.SetMode(gin.ReleaseMode)
-	r := gin.Default()
+	r := gin.New()
+	r.StaticFS("/dashboard/", http.FS(web.StaticFS))
 	g1 := r.Group("/api/v1")
 	g1.GET("/ping", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
@@ -170,13 +174,13 @@ func RunLocalHttpServer() {
 			"tx": stats.TX,
 		})
 	})
-	g1.GET("/online/clients", func(c *gin.Context) {
+	g1.GET("/clients", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"data": stats.ClientList,
 		})
 	})
 	r.GET("/", func(c *gin.Context) {
-		c.String(http.StatusOK, ":)   this is vpn gateway!")
+		c.String(http.StatusOK, ":)   this is vpn gateway!\ndashboard at /dashboard\ncopyright follow 2023")
 	})
 	err = r.RunListener(listener)
 	if err != nil {
@@ -230,26 +234,43 @@ func createIPCRequest(config *config.Config) string {
 	return request.String()[:request.Len()]
 }
 
-// convert endpoint string to netip.Addr
+var IPv6AddrPortRegex = regexp.MustCompile("^\\[([a-f0-9A-F:]{2,})\\]\\:([0-9]{1,})$")
+
+// convert endpoint string to netip.AddrPort
 func parseEndpoints(endpoint string) (*netip.AddrPort, error) {
 	var addr netip.Addr
 	var port uint16 = 2080
 	var err error
-	if strings.Contains(endpoint, ":") {
-		sp := strings.Split(endpoint, ":")
-		_port, err := strconv.Atoi(sp[1])
+	if strings.Count(endpoint, ":") > 1 {
+		//ipv6
+		matchArr := IPv6AddrPortRegex.FindStringSubmatch(endpoint)
+		if len(matchArr) < 3 {
+			return nil, errors.New("it not is ipv6 address")
+		}
+		_port, err := strconv.Atoi(matchArr[2])
 		if err != nil {
 			return nil, err
 		}
-		endpoint = sp[0]
+		endpoint = matchArr[1]
 		port = uint16(_port)
-	}
-	if IsDomainName(endpoint) {
-		ip, err := LookupDomainFirst(endpoint)
-		if err != nil {
-			return nil, err
+	} else {
+		//ipv4 or domain
+		if strings.Contains(endpoint, ":") {
+			sp := strings.Split(endpoint, ":")
+			_port, err := strconv.Atoi(sp[1])
+			if err != nil {
+				return nil, err
+			}
+			endpoint = sp[0]
+			port = uint16(_port)
 		}
-		endpoint = ip.String()
+		if IsDomainName(endpoint) {
+			ip, err := LookupDomainFirst(endpoint)
+			if err != nil {
+				return nil, err
+			}
+			endpoint = ip.String()
+		}
 	}
 	addr, err = netip.ParseAddr(endpoint)
 	if err != nil {
