@@ -95,7 +95,7 @@ func (x *Server) onWebsocket(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("forbidden"))
 		return
 	}
-	//conn.SetReadDeadline(time.Time{})
+	conn.SetReadDeadline(time.Time{})
 	x.Statistics.Push(conn.RemoteAddr())
 	logger.Logger.Sugar().Debugf("open: %s", conn.RemoteAddr().String())
 }
