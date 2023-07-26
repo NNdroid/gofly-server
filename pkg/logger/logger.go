@@ -12,7 +12,7 @@ var (
 
 func Init() {
 	rawJSON := []byte(`{
-		"level": "info",
+		"level": "debug",
 		"outputPaths": ["stdout"],
 		"errorOutputPaths": ["stderr"],
 		"encoding": "json",

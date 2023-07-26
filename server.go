@@ -12,6 +12,8 @@ import (
 	"gofly/pkg/layers/ipv4"
 	"gofly/pkg/layers/ipv6"
 	"gofly/pkg/logger"
+	"gofly/pkg/protocol/basic"
+	"gofly/pkg/protocol/reality"
 	"gofly/pkg/protocol/ws"
 	"gofly/pkg/statistics"
 	ct "gofly/pkg/tun"
@@ -49,12 +51,12 @@ func parseAddr(address []string) []netip.Addr {
 
 func StartServer(config *config.Config) {
 	_ctx, cancel = context.WithCancel(context.Background())
-	ipv4Addr := utils.FindAIPv4Address(config.Wg.Address)
+	ipv4Addr := utils.FindAIPv4Address(config.WireGuardSettings.Address)
 	if ipv4Addr == "" {
 		logger.Logger.Fatal("can not find a ipv4 address from configuration.")
 		return
 	}
-	ipv6Addr := utils.FindAIPv6Address(config.Wg.Address)
+	ipv6Addr := utils.FindAIPv6Address(config.WireGuardSettings.Address)
 	if ipv6Addr == "" {
 		logger.Logger.Fatal("can not find a ipv6 address from configuration.")
 		return
@@ -63,13 +65,13 @@ func StartServer(config *config.Config) {
 		V4Layer: ipv4.New(ipv4Addr),
 		V6Layer: ipv6.New(ipv6Addr),
 	}
-	layer.LoadAddress(config.Wg.Address)
+	layer.LoadAddress(config.WireGuardSettings.Address)
 	ct.Init(_ctx)
 	var err error
 	ti, tNet, err = ct.CreateNetTUN(
-		parseAddr(config.Wg.Address),
-		parseAddr(config.Wg.DNS),
-		config.Wg.MTU,
+		parseAddr(config.WireGuardSettings.Address),
+		parseAddr(config.WireGuardSettings.DNS),
+		config.WireGuardSettings.MTU,
 	)
 	if err != nil {
 		log.Panic(err)
@@ -88,7 +90,8 @@ func StartServer(config *config.Config) {
 	//go RunHttpClient()
 	go RunLocalHttpServer()
 	stats = &statistics.Statistics{}
-	server := &ws.Server{
+	go stats.AutoUpdateChartData()
+	bs := basic.Server{
 		Layer:          layer,
 		Config:         config,
 		ReadFunc:       ReadFromWireGuard,
@@ -97,12 +100,37 @@ func StartServer(config *config.Config) {
 		CTX:            _ctx,
 		Statistics:     stats,
 	}
-	//websocket server
+	var server basic.ServerForApi
+	switch config.VTunSettings.Protocol {
+	case "ws", "wss":
+		err = config.WebSocketSettings.Check()
+		if err != nil {
+			logger.Logger.Sugar().Errorf("error: %v\n", zap.Error(err))
+			return
+		}
+		server = &ws.Server{
+			Server: bs,
+		}
+		break
+	case "reality":
+		err = config.RealitySettings.Check()
+		if err != nil {
+			logger.Logger.Sugar().Errorf("error: %v\n", zap.Error(err))
+			return
+		}
+		server = &reality.Server{
+			Server: bs,
+		}
+		break
+	default:
+		log.Panic(errors.New("unsupported protocol"))
+	}
+	//start server
 	server.StartServerForApi()
 }
 
 func ReadTunSync(config *config.Config) {
-	buffer := make([]byte, config.VTun.BufferSize)
+	buffer := make([]byte, config.VTunSettings.BufferSize)
 	for contextOpened(_ctx) {
 		n, err := ReadFromTun(buffer)
 		if err != nil {
@@ -174,6 +202,15 @@ func RunLocalHttpServer() {
 			"tx": stats.TX,
 		})
 	})
+	g1.GET("/traffic/chart", func(c *gin.Context) {
+		tbx, rbx, labels, count := stats.ChartData.GetData()
+		c.JSON(http.StatusOK, gin.H{
+			"receive":   rbx,
+			"transport": tbx,
+			"labels":    labels,
+			"count":     count,
+		})
+	})
 	g1.GET("/clients", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"data": stats.ClientList,
@@ -213,9 +250,9 @@ func Close() {
 func createIPCRequest(config *config.Config) string {
 	var request bytes.Buffer
 
-	request.WriteString(fmt.Sprintf("private_key=%s\n", config.Wg.SecretKey))
+	request.WriteString(fmt.Sprintf("private_key=%s\n", config.WireGuardSettings.SecretKey))
 
-	for _, peer := range config.Wg.Peers {
+	for _, peer := range config.WireGuardSettings.Peers {
 		endpoint, err := parseEndpoints(peer.EndPoint)
 		if err != nil {
 			logger.Logger.Sugar().Error(zap.Error(err))

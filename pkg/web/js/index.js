@@ -26,6 +26,15 @@ var trafficData = {
                     }
                 }
             }
+        },
+        plugins: {
+            tooltip: {
+                callbacks: {
+                    label: function (context) {
+                        return getFriendlyByteString(context.parsed.y)
+                    }
+                }
+            }
         }
     }
 };
@@ -34,9 +43,8 @@ const trafficChart = new Chart(ctx, trafficData);
 
 updateYourInfo()
 
-var currentTrafficRX = 0
-var currentTrafficTX = 0
-setInterval(updateTrafficData, 1000, trafficChart, trafficData)
+setInterval(updateTrafficChartsData, 1000, trafficChart, trafficData)
+setInterval(updateTrafficData, 1000)
 setInterval(updateOnlineClientCount, 1000)
 setInterval(tableGenerateList, 1000)
 
@@ -67,7 +75,21 @@ function updateOnlineClientCount() {
         })
 }
 
-function updateTrafficData(chart, data) {
+function updateTrafficChartsData(chart, data) {
+    fetch('/api/v1/traffic/chart')
+        .then(r => r.json())
+        .then(r => {
+            data.data.labels = r.labels
+            data.data.datasets[0].data = r.transport
+            data.data.datasets[1].data = r.receive
+            chart.update()
+        })
+        .catch(err => {
+            new $.zui.Messager(err,{}).show();
+        })
+}
+
+function updateTrafficData(data) {
     const trafficTotalRxElement = document.getElementById("traffic_total_rx")
     const trafficTotalTxElement = document.getElementById("traffic_total_tx")
     fetch('/api/v1/traffic')
@@ -75,14 +97,6 @@ function updateTrafficData(chart, data) {
         .then(r => {
             trafficTotalRxElement.innerText = getFriendlyByteStringB(r.rx)
             trafficTotalTxElement.innerText = getFriendlyByteStringB(r.tx)
-            let diffRX = currentTrafficRX !== 0 ? r.rx - currentTrafficRX : 0
-            let diffTX = currentTrafficTX !== 0 ? r.tx - currentTrafficTX : 0
-            data.data.labels.push(getNowTime())
-            data.data.datasets[0].data.push(diffTX)
-            data.data.datasets[1].data.push(diffRX)
-            chart.update()
-            currentTrafficRX = r.rx
-            currentTrafficTX = r.tx
         })
         .catch(err => {
             new $.zui.Messager(err,{}).show();

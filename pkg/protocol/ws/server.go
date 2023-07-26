@@ -10,12 +10,8 @@ import (
 	"github.com/patrickmn/go-cache"
 	"go.uber.org/zap"
 	"gofly/pkg/cipher"
-	"gofly/pkg/config"
-	"gofly/pkg/layers"
-	"gofly/pkg/layers/ipv4"
-	"gofly/pkg/layers/ipv6"
 	"gofly/pkg/logger"
-	"gofly/pkg/statistics"
+	"gofly/pkg/protocol/basic"
 	"gofly/pkg/utils"
 	"log"
 	"net/http"
@@ -31,14 +27,7 @@ import (
 const AuthFieldKey = "key"
 
 type Server struct {
-	Layer           *layers.Layer
-	Config          *config.Config
-	ReadFunc        func([]byte) (int, error)
-	WriteFunc       func([]byte) int
-	WriteToTunFunc  func(buf []byte) (int, error)
-	CTX             context.Context
-	connectionCache *cache.Cache
-	Statistics      *statistics.Statistics
+	basic.Server
 }
 
 func (x *Server) newUpgrade() *websocket.Upgrader {
@@ -59,15 +48,15 @@ func (x *Server) newUpgrade() *websocket.Upgrader {
 		if messageType == websocket.BinaryMessage {
 			n := len(data)
 			x.Statistics.IncrReceivedBytes(n)
-			if x.Config.VTun.Compress {
+			if x.Config.VTunSettings.Compress {
 				data, _ = snappy.Decode(nil, data)
 			}
-			if x.Config.VTun.Obfs {
+			if x.Config.VTunSettings.Obfs {
 				data = cipher.XOR(data)
 			}
 			if key := utils.GetSrcKey(data); key != "" {
-				x.connectionCache.Set(key, c, 24*time.Hour)
-				x.convertSrcAddr(data)
+				x.ConnectionCache.Set(key, c, 24*time.Hour)
+				x.ConvertSrcAddr(data)
 				x.WriteFunc(data)
 				x.Statistics.IncrClientTransportBytes(c.RemoteAddr(), n)
 			}
@@ -102,17 +91,17 @@ func (x *Server) onWebsocket(w http.ResponseWriter, r *http.Request) {
 
 // StartServerForApi starts the ws server
 func (x *Server) StartServerForApi() {
-	if !x.Config.VTun.Verbose {
+	if !x.Config.VTunSettings.Verbose {
 		logging.SetLevel(logging.LevelNone)
 		gin.SetMode(gin.ReleaseMode)
 	}
-	x.connectionCache = cache.New(15*time.Minute, 24*time.Hour)
-	cipher.SetKey(x.Config.VTun.Key)
+	x.ConnectionCache = cache.New(15*time.Minute, 24*time.Hour)
+	cipher.SetKey(x.Config.VTunSettings.Key)
 	// server -> client
 	go x.toClient()
 	// client -> server
 	mux := &http.ServeMux{}
-	mux.HandleFunc(x.Config.VTun.Path, x.onWebsocket)
+	mux.HandleFunc(x.Config.WebSocketSettings.Path, x.onWebsocket)
 	mux.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Header().Set("Content-Type", "text/plain")
@@ -125,28 +114,27 @@ func (x *Server) StartServerForApi() {
 	})
 
 	var svr *nbhttp.Server
-	if x.Config.VTun.Protocol == "wss" {
-		cert, err := tls.LoadX509KeyPair(x.Config.VTun.TLSCertificateFilePath, x.Config.VTun.TLSCertificateKeyFilePath)
+	if x.Config.VTunSettings.Protocol == "wss" {
+		if x.Config.WebSocketSettings.TLSCertificateFilePath == "" || x.Config.WebSocketSettings.TLSCertificateKeyFilePath == "" {
+			log.Panic(errors.New("tls certificate file location not set"))
+		}
+		cert, err := tls.LoadX509KeyPair(x.Config.WebSocketSettings.TLSCertificateFilePath, x.Config.WebSocketSettings.TLSCertificateKeyFilePath)
 		if err != nil {
 			log.Panic(err)
 		}
 		tlsConfig := &tls.Config{
-			Certificates:       []tls.Certificate{cert},
-			InsecureSkipVerify: x.Config.VTun.TLSInsecureSkipVerify,
-		}
-		if x.Config.VTun.TLSSni != "" {
-			tlsConfig.ServerName = x.Config.VTun.TLSSni
+			Certificates: []tls.Certificate{cert},
 		}
 		svr = nbhttp.NewServer(nbhttp.Config{
 			Network:   "tcp",
-			AddrsTLS:  []string{x.Config.VTun.LocalAddr},
+			AddrsTLS:  []string{x.Config.VTunSettings.LocalAddr},
 			TLSConfig: tlsConfig,
 			Handler:   mux,
 		})
 	} else {
 		svr = nbhttp.NewServer(nbhttp.Config{
 			Network: "tcp",
-			Addrs:   []string{x.Config.VTun.LocalAddr},
+			Addrs:   []string{x.Config.VTunSettings.LocalAddr},
 			Handler: mux,
 		})
 	}
@@ -158,7 +146,7 @@ func (x *Server) StartServerForApi() {
 	}
 	defer svr.Stop()
 
-	logger.Logger.Sugar().Infof("gofly %s server started on %v", x.Config.VTun.Protocol, x.Config.VTun.LocalAddr)
+	logger.Logger.Sugar().Infof("gofly %s server started on %v", x.Config.VTunSettings.Protocol, x.Config.VTunSettings.LocalAddr)
 
 	interrupt := make(chan os.Signal, 1)
 	signal.Notify(interrupt, os.Interrupt)
@@ -171,12 +159,12 @@ func (x *Server) StartServerForApi() {
 // checkPermission checks the permission of the request
 // Validation is successful if the header or request parameters contain specific data.
 func (x *Server) checkPermission(req *http.Request) bool {
-	if x.Config.VTun.Key == "" {
+	if x.Config.VTunSettings.Key == "" {
 		return true
 	}
 	key1 := req.Header.Get(AuthFieldKey)
 	key2 := req.URL.Query().Get(AuthFieldKey)
-	if key1 != x.Config.VTun.Key && key2 != x.Config.VTun.Key {
+	if key1 != x.Config.VTunSettings.Key && key2 != x.Config.VTunSettings.Key {
 		return false
 	}
 	return true
@@ -184,9 +172,9 @@ func (x *Server) checkPermission(req *http.Request) bool {
 
 // toClient WireGuard to GateWay - ReadFunc
 func (x *Server) toClient() {
-	packet := make([]byte, x.Config.VTun.BufferSize)
-	for contextOpened(x.CTX) {
-		n, err := x.ReadFunc(packet)
+	buffer := make([]byte, x.Config.VTunSettings.BufferSize)
+	for basic.ContextOpened(x.CTX) {
+		n, err := x.ReadFunc(buffer)
 		if err != nil {
 			logger.Logger.Error("getData Error", zap.Error(err))
 			break
@@ -194,14 +182,14 @@ func (x *Server) toClient() {
 		if n == 0 {
 			continue
 		}
-		b := packet[:n]
-		x.convertDstAddr(b)
+		b := buffer[:n]
+		x.ConvertDstAddr(b)
 		if key := utils.GetDstKey(b); key != "" {
-			if v, ok := x.connectionCache.Get(key); ok {
-				if x.Config.VTun.Obfs {
+			if v, ok := x.ConnectionCache.Get(key); ok {
+				if x.Config.VTunSettings.Obfs {
 					b = cipher.XOR(b)
 				}
-				if x.Config.VTun.Compress {
+				if x.Config.VTunSettings.Compress {
 					b = snappy.Encode(nil, b)
 				}
 				ns := len(b)
@@ -209,112 +197,12 @@ func (x *Server) toClient() {
 				err = conn.WriteMessage(websocket.BinaryMessage, b)
 				if err != nil {
 					logger.Logger.Error("write data error", zap.Error(err))
-					x.connectionCache.Delete(key)
+					x.ConnectionCache.Delete(key)
 					continue
 				}
 				x.Statistics.IncrTransportBytes(ns)
 				x.Statistics.IncrClientReceivedBytes(conn.RemoteAddr(), ns)
 			}
 		}
-	}
-}
-
-func (x *Server) convertDstAddr(packet []byte) {
-	if ok, _ := x.Layer.IsLocalSrcPacket(packet); ok {
-		return
-	}
-	version := packet[0] >> 4
-	if version == 4 {
-		p := ipv4.GetProtocol(packet)
-		if p == "tcp" {
-			dstAddr := ipv4.ParseDstTcp(packet)
-			x.Layer.V4Layer.ReplaceDstAddrTcp(packet, dstAddr)
-			ipv4.CalcIPCheckSum(packet)
-			ipv4.CalcTCPCheckSum(packet)
-		} else if p == "udp" {
-			dstAddr := ipv4.ParseDstUdp(packet)
-			x.Layer.V4Layer.ReplaceDstAddrUdp(packet, dstAddr)
-			ipv4.CalcIPCheckSum(packet)
-			ipv4.CalcUDPCheckSum(packet)
-		} else if p == "icmp" {
-			srcAddr := ipv4.ParseSrcIcmpTag(packet, true) // dst ip
-			dstAddr := ipv4.ParseDstIcmpTag(packet, true) // gateway ip
-			x.Layer.V4Layer.ReplaceDstAddrIcmp(packet, dstAddr, srcAddr)
-			ipv4.CalcIPCheckSum(packet)
-			ipv4.CalcICMPCheckSum(packet)
-		}
-	} else if version == 6 {
-		p := ipv6.GetProtocol(packet)
-		if p == "tcp" {
-			dstAddr := ipv6.ParseDstTcp(packet)
-			x.Layer.V6Layer.ReplaceDstAddrTcp(packet, dstAddr)
-			ipv6.CalcTCPCheckSum(packet)
-		} else if p == "udp" {
-			dstAddr := ipv6.ParseDstUdp(packet)
-			x.Layer.V6Layer.ReplaceDstAddrUdp(packet, dstAddr)
-			ipv6.CalcUDPCheckSum(packet)
-		} else if p == "icmp" {
-			srcAddr := ipv6.ParseSrcIcmpTag(packet, true) // dst ip
-			dstAddr := ipv6.ParseDstIcmpTag(packet, true) // gateway ip
-			x.Layer.V6Layer.ReplaceDstAddrIcmp(packet, dstAddr, srcAddr)
-			ipv6.CalcICMPCheckSum(packet)
-		}
-	}
-}
-
-func (x *Server) convertSrcAddr(packet []byte) {
-	if ok, _ := x.Layer.IsLocalDstPacket(packet); ok {
-		_, err := x.WriteToTunFunc(packet)
-		if err != nil {
-			logger.Logger.Sugar().Errorf("write to tun error, %v\n", zap.Error(err))
-			return
-		}
-		return
-	}
-	version := packet[0] >> 4
-	if version == 4 {
-		p := ipv4.GetProtocol(packet)
-		if p == "tcp" {
-			srcAddr := ipv4.ParseSrcTcp(packet)
-			x.Layer.V4Layer.ReplaceSrcAddrTcp(packet, srcAddr)
-			ipv4.CalcIPCheckSum(packet)
-			ipv4.CalcTCPCheckSum(packet)
-		} else if p == "udp" {
-			srcAddr := ipv4.ParseSrcUdp(packet)
-			x.Layer.V4Layer.ReplaceSrcAddrUdp(packet, srcAddr)
-			ipv4.CalcIPCheckSum(packet)
-			ipv4.CalcUDPCheckSum(packet)
-		} else if p == "icmp" {
-			srcAddr := ipv4.ParseSrcIcmpTag(packet, false) // client ip
-			dstAddr := ipv4.ParseDstIcmpTag(packet, false) // dst ip
-			x.Layer.V4Layer.ReplaceSrcAddrIcmp(packet, dstAddr, srcAddr)
-			ipv4.CalcIPCheckSum(packet)
-			ipv4.CalcICMPCheckSum(packet)
-		}
-	} else if version == 6 {
-		p := ipv6.GetProtocol(packet)
-		if p == "tcp" {
-			srcAddr := ipv6.ParseSrcTcp(packet)
-			x.Layer.V6Layer.ReplaceSrcAddrTcp(packet, srcAddr)
-			ipv6.CalcTCPCheckSum(packet)
-		} else if p == "udp" {
-			srcAddr := ipv6.ParseSrcUdp(packet)
-			x.Layer.V6Layer.ReplaceSrcAddrUdp(packet, srcAddr)
-			ipv6.CalcUDPCheckSum(packet)
-		} else if p == "icmp" {
-			srcAddr := ipv6.ParseSrcIcmpTag(packet, false) // client ip
-			dstAddr := ipv6.ParseDstIcmpTag(packet, false) // dst ip
-			x.Layer.V6Layer.ReplaceSrcAddrIcmp(packet, dstAddr, srcAddr)
-			ipv6.CalcICMPCheckSum(packet)
-		}
-	}
-}
-
-func contextOpened(_ctx context.Context) bool {
-	select {
-	case <-_ctx.Done():
-		return false
-	default:
-		return true
 	}
 }

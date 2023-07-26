@@ -1,48 +1,79 @@
 package config
 
+import "errors"
+
+type IPluginConfig interface {
+	Check() error
+}
+
+type Server struct {
+}
+
 type Config struct {
-	VTun VTunConfig `yaml:"vtun"`
-	Wg   WGConfig   `yaml:"wg"`
+	VTunSettings      VTunConfig      `yaml:"vTunSettings"`
+	WireGuardSettings WireGuardConfig `yaml:"wgSettings"`
+	WebSocketSettings WebSocketConfig `yaml:"wsSettings"`
+	RealitySettings   RealityConfig   `yaml:"realitySettings"`
 }
 
 type VTunConfig struct {
-	DeviceName                string `yaml:"device_name"`
-	LocalAddr                 string `yaml:"local_addr"`
-	ServerAddr                string `yaml:"server_addr"`
-	ServerIP                  string `yaml:"server_ip"`
-	ServerIPv6                string `yaml:"server_i_pv_6"`
-	CIDR                      string `yaml:"cidr"`
-	CIDRv6                    string `yaml:"cid_rv_6"`
-	Key                       string `yaml:"key"`
-	Protocol                  string `yaml:"protocol"`
+	LocalAddr  string `yaml:"local_addr"`
+	Key        string `yaml:"key"`
+	Protocol   string `yaml:"protocol"`
+	Obfs       bool   `yaml:"obfs"`
+	Compress   bool   `yaml:"compress"`
+	MTU        int    `yaml:"mtu"`
+	Timeout    int    `yaml:"timeout"` //Unit second
+	BufferSize int    `yaml:"buffer_size"`
+	Verbose    bool   `yaml:"verbose"`
+}
+
+type WebSocketConfig struct {
 	Path                      string `yaml:"path"`
-	ServerMode                bool   `yaml:"server_mode"`
-	GlobalMode                bool   `yaml:"global_mode"`
-	Obfs                      bool   `yaml:"obfs"`
-	Compress                  bool   `yaml:"compress"`
-	MTU                       int    `yaml:"mtu"`
-	Timeout                   int    `yaml:"timeout"`
-	LocalGateway              string `yaml:"local_gateway"`
-	LocalGatewayv6            string `yaml:"local_gatewayv_6"`
 	TLSCertificateFilePath    string `yaml:"tls_certificate_file_path"`
 	TLSCertificateKeyFilePath string `yaml:"tls_certificate_key_file_path"`
-	TLSSni                    string `yaml:"tls_sni"`
-	TLSInsecureSkipVerify     bool   `yaml:"tls_insecure_skip_verify"`
-	BufferSize                int    `yaml:"buffer_size"`
-	Verbose                   bool   `yaml:"verbose"`
-	PSKMode                   bool   `yaml:"psk_mode"`
-	Host                      string `yaml:"host"`
 }
 
-type WGConfig struct {
-	SecretKey string   `yaml:"secret_key"`
-	Address   []string `yaml:"address"`
-	Peers     []WGPeer `yaml:"peers"`
-	DNS       []string `yaml:"dns"`
-	MTU       int      `yaml:"mtu"`
+func (c *WebSocketConfig) Check() error {
+	if c.Path == "" {
+		c.Path = "/"
+	}
+	return nil
 }
 
-type WGPeer struct {
+type WireGuardConfig struct {
+	SecretKey string          `yaml:"secret_key"`
+	Address   []string        `yaml:"address"`
+	Peers     []WireGuardPeer `yaml:"peers"`
+	DNS       []string        `yaml:"dns"`
+	MTU       int             `yaml:"mtu"`
+}
+
+type RealityConfig struct {
+	ShortID     []string `yaml:"short_id"`
+	ServerNames []string `yaml:"server_names"`
+	Dest        string   `yaml:"dest"`
+	PrivateKey  string   `yaml:"private_key"`
+	Debug       bool     `yaml:"debug"`
+}
+
+func (c *RealityConfig) Check() error {
+	if len(c.ShortID) == 0 {
+		return errors.New("shortId can not empty")
+	}
+	if len(c.ServerNames) == 0 {
+		return errors.New("serverNames can not empty")
+	}
+	if c.Dest == "" {
+		return errors.New("dest can not empty")
+	}
+	if c.PrivateKey == "" {
+		return errors.New("privateKey can not empty")
+	}
+	return nil
+}
+
+type WireGuardPeer struct {
 	EndPoint     string   `yaml:"end_point"`
 	PublicKey    string   `yaml:"public_key"`
 	PreSharedKey string   `yaml:"preshared_key"`
@@ -51,9 +82,21 @@ type WGPeer struct {
 }
 
 func (config *Config) setDefault() {
-	for i, peer := range config.Wg.Peers {
+	if config.VTunSettings.BufferSize == 0 {
+		config.VTunSettings.BufferSize = 65535
+	}
+	if config.VTunSettings.Protocol == "" {
+		config.VTunSettings.Protocol = "ws"
+	}
+	if config.VTunSettings.MTU == 0 {
+		config.VTunSettings.MTU = 1420
+	}
+	if config.VTunSettings.Timeout == 0 {
+		config.VTunSettings.Timeout = 60
+	}
+	for i, peer := range config.WireGuardSettings.Peers {
 		if len(peer.AllowedIPs) == 0 {
-			config.Wg.Peers[i].AllowedIPs = append(config.Wg.Peers[i].AllowedIPs, "0.0.0.0/0", "::/0")
+			config.WireGuardSettings.Peers[i].AllowedIPs = append(config.WireGuardSettings.Peers[i].AllowedIPs, "0.0.0.0/0", "::/0")
 			break
 		}
 	}
