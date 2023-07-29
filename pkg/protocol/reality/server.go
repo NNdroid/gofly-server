@@ -143,6 +143,7 @@ func (x *Server) ToClient() {
 		x.ConvertDstAddr(b)
 		if key := utils.GetDstKey(b); key != "" {
 			if v, ok := x.ConnectionCache.Get(key); ok {
+				x.ConnectionCache.Set(key, v, 15*time.Minute)
 				if x.Config.VTunSettings.Obfs {
 					b = cipher.XOR(b)
 				}
@@ -159,14 +160,7 @@ func (x *Server) ToClient() {
 					Length:          len(b),
 				}
 				conn := v.(net.Conn)
-				_, err = conn.Write(ph.Bytes())
-				if err != nil {
-					logger.Logger.Sugar().Errorf("error, %v\n", err)
-					x.ConnectionCache.Delete(key)
-					x.closeTheClient(conn, err)
-					continue
-				}
-				ns, err := conn.Write(b)
+				ns, err := conn.Write(xproto.Merge(ph.Bytes(), b))
 				if err != nil {
 					logger.Logger.Sugar().Errorf("error, %v\n", err)
 					x.ConnectionCache.Delete(key)
@@ -175,11 +169,10 @@ func (x *Server) ToClient() {
 				}
 				x.Statistics.IncrTransportBytes(ns)
 				x.Statistics.IncrClientReceivedBytes(conn.RemoteAddr(), ns)
+			} else if v, _, ok := x.ConnectionCache.GetWithExpiration(key); ok {
+				x.closeTheClient(v.(net.Conn), errors.New("active shutdown, cache was expired"))
+				x.ConnectionCache.Delete(key)
 			}
-			//else if v, _, ok := x.ConnectionCache.GetWithExpiration(key); ok {
-			//	x.closeTheClient(v.(net.Conn), errors.New("active shutdown, cache was expired"))
-			//	x.ConnectionCache.Delete(key)
-			//}
 		}
 	}
 }
@@ -215,9 +208,11 @@ func (x *Server) ToServer(conn net.Conn) {
 		logger.Logger.Sugar().Errorln("authentication failed")
 		return
 	}
-	x.ConnectionCache.Set(hs.CIDRv4.String(), conn, cache.NoExpiration)
-	x.ConnectionCache.Set(hs.CIDRv6.String(), conn, cache.NoExpiration)
+	x.ConnectionCache.Set(hs.CIDRv4.String(), conn, 15*time.Minute)
+	x.ConnectionCache.Set(hs.CIDRv6.String(), conn, 15*time.Minute)
+	total := 0
 	for basic.ContextOpened(x.CTX) {
+		total = 0
 		n, err := conn.Read(header)
 		if err != nil {
 			logger.Logger.Sugar().Errorf("error, %v\n", err)
@@ -227,6 +222,7 @@ func (x *Server) ToServer(conn net.Conn) {
 			logger.Logger.Sugar().Errorf("received length <%d> not equals <%d>!", n, xproto.ClientSendPacketHeaderLength)
 			break
 		}
+		total += n
 		ph := xproto.ParseClientSendPacketHeader(header[:n])
 		if ph == nil {
 			logger.Logger.Sugar().Errorln("ph == nil")
@@ -245,6 +241,7 @@ func (x *Server) ToServer(conn net.Conn) {
 			logger.Logger.Sugar().Errorf("received length <%d> not equals <%d>!", n, ph.Length)
 			break
 		}
+		total += length
 		b := packet[:length]
 		if x.Config.VTunSettings.Compress {
 			b, err = snappy.Decode(nil, b)
@@ -262,9 +259,9 @@ func (x *Server) ToServer(conn net.Conn) {
 			b = cipher.XOR(b)
 		}
 		x.ConvertSrcAddr(b)
-		ns := x.WriteFunc(b)
-		x.Statistics.IncrReceivedBytes(ns)
-		x.Statistics.IncrClientTransportBytes(conn.RemoteAddr(), ns)
+		x.WriteFunc(b)
+		x.Statistics.IncrReceivedBytes(total)
+		x.Statistics.IncrClientTransportBytes(conn.RemoteAddr(), total)
 	}
 }
 
