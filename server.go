@@ -76,7 +76,11 @@ func StartServer(config *config.Config) {
 	if err != nil {
 		log.Panic(err)
 	}
-	dev := device.NewDevice(ti, conn.NewDefaultBind(), device.NewLogger(device.LogLevelSilent, ""))
+	logLevel := device.LogLevelSilent
+	if config.VTunSettings.Verbose {
+		logLevel = device.LogLevelVerbose
+	}
+	dev := device.NewDevice(ti, conn.NewDefaultBind(), device.NewLogger(logLevel, ""))
 	ClientConfig := createIPCRequest(config)
 	err = dev.IpcSet(ClientConfig)
 	if err != nil {
