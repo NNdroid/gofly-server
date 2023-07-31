@@ -15,8 +15,8 @@ import (
 	"gofly/pkg/logger"
 	"gofly/pkg/protocol/basic"
 	"gofly/pkg/utils"
-	"gofly/pkg/xcrypto"
-	"gofly/pkg/xproto"
+	"gofly/pkg/x/xcrypto"
+	"gofly/pkg/x/xproto"
 	"net"
 	"time"
 )

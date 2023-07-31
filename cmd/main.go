@@ -4,9 +4,9 @@ import (
 	"flag"
 	"go.uber.org/zap"
 	"gofly"
-	"gofly/pkg/commonio"
 	"gofly/pkg/config"
 	"gofly/pkg/logger"
+	"gofly/pkg/utils"
 	"log"
 	"os"
 )
@@ -46,10 +46,10 @@ func init() {
 	if _flagQuiet {
 		logger.Cfg.Level.SetLevel(zap.ErrorLevel)
 	}
-	if !commonio.IsFile(_configFilePath) || !commonio.ExistsFile(_configFilePath) {
+	if !utils.IsFile(_configFilePath) || !utils.ExistsFile(_configFilePath) {
 		logger.Logger.Fatal("configure file not found!")
 	}
-	dat, err := commonio.ReadFile(_configFilePath)
+	dat, err := utils.ReadFile(_configFilePath)
 	if err != nil {
 		logger.Logger.Fatal("read configure file fail!", zap.Error(err))
 	}

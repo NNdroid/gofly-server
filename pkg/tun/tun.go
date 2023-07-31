@@ -7,7 +7,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"gofly/pkg/xchan"
+	"gofly/pkg/x/xchan"
 	"io"
 	"log"
 	"net"
