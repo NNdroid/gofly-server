@@ -1,6 +1,8 @@
 package config
 
-import "errors"
+import (
+	"errors"
+)
 
 type IPluginConfig interface {
 	Check() error
@@ -100,4 +102,8 @@ func (config *Config) setDefault() {
 			break
 		}
 	}
+}
+
+func (config *Config) Check() error {
+	return nil
 }

@@ -133,8 +133,9 @@ func (x *Server) ToClient() {
 		logger.Logger.Sugar().Errorf("error, %v\n", err)
 		return
 	}
+	var n int
 	for basic.ContextOpened(x.CTX) {
-		n, err := x.ReadFunc(buffer)
+		n, err = x.ReadFunc(buffer)
 		if err != nil {
 			logger.Logger.Sugar().Errorf("error, %v\n", err)
 			continue
@@ -177,10 +178,30 @@ func (x *Server) ToClient() {
 	}
 }
 
+func (x *Server) HandshakeFromClient(conn net.Conn, authKey *xproto.AuthKey) error {
+	handshake := make([]byte, xproto.ClientHandshakePacketLength)
+	n, err := conn.Read(handshake)
+	if err != nil {
+		return fmt.Errorf("error, %v\n", err)
+	}
+	if n != xproto.ClientHandshakePacketLength {
+		return fmt.Errorf("received handshake length <%d> not equals <%d>!\n", n, xproto.ClientHandshakePacketLength)
+	}
+	hs := xproto.ParseClientHandshakePacket(handshake[:n])
+	if hs == nil {
+		return fmt.Errorf("hs == nil")
+	}
+	if !hs.Key.Equals(authKey) {
+		return fmt.Errorf("authentication failed")
+	}
+	x.ConnectionCache.Set(hs.CIDRv4.String(), conn, 15*time.Minute)
+	x.ConnectionCache.Set(hs.CIDRv6.String(), conn, 15*time.Minute)
+	return nil
+}
+
 // ToServer sends packets from conn to iFace
 func (x *Server) ToServer(conn net.Conn) {
 	defer x.closeTheClient(conn, errors.New("active shutdown"))
-	handshake := make([]byte, xproto.ClientHandshakePacketLength)
 	header := make([]byte, xproto.ClientSendPacketHeaderLength)
 	packet := make([]byte, x.Config.VTunSettings.BufferSize)
 	authKey := xproto.ParseAuthKeyFromString(x.Config.VTunSettings.Key)
@@ -190,30 +211,17 @@ func (x *Server) ToServer(conn net.Conn) {
 		logger.Logger.Sugar().Errorf("error, %v\n", err)
 		return
 	}
-	n, err := conn.Read(handshake)
+	err = x.HandshakeFromClient(conn, authKey)
 	if err != nil {
 		logger.Logger.Sugar().Errorf("error, %v\n", err)
 		return
 	}
-	if n != xproto.ClientHandshakePacketLength {
-		logger.Logger.Sugar().Errorf("received handshake length <%d> not equals <%d>!\n", n, xproto.ClientHandshakePacketLength)
-		return
-	}
-	hs := xproto.ParseClientHandshakePacket(handshake[:n])
-	if hs == nil {
-		logger.Logger.Sugar().Errorln("hs == nil")
-		return
-	}
-	if !hs.Key.Equals(authKey) {
-		logger.Logger.Sugar().Errorln("authentication failed")
-		return
-	}
-	x.ConnectionCache.Set(hs.CIDRv4.String(), conn, 15*time.Minute)
-	x.ConnectionCache.Set(hs.CIDRv6.String(), conn, 15*time.Minute)
-	total := 0
+	var total int
+	var length int
+	var n int
 	for basic.ContextOpened(x.CTX) {
 		total = 0
-		n, err := conn.Read(header)
+		n, err = conn.Read(header)
 		if err != nil {
 			logger.Logger.Sugar().Errorf("error, %v\n", err)
 			break
@@ -232,7 +240,7 @@ func (x *Server) ToServer(conn net.Conn) {
 			logger.Logger.Sugar().Errorln("authentication failed")
 			break
 		}
-		length, err := splitRead(conn, ph.Length, packet[:ph.Length])
+		length, err = splitRead(conn, ph.Length, packet[:ph.Length])
 		if err != nil {
 			logger.Logger.Sugar().Errorf("error, %v\n", err)
 			break

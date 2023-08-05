@@ -57,6 +57,10 @@ func init() {
 	if err != nil {
 		logger.Logger.Fatal("parse configure file fail!", zap.Error(err))
 	}
+	err = _config.Check()
+	if err != nil {
+		logger.Logger.Fatal("check configure fail!", zap.Error(err))
+	}
 	if _flagQuiet {
 		_config.VTunSettings.Verbose = false
 	}

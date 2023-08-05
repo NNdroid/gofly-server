@@ -1,6 +1,7 @@
 package ipv6
 
 import (
+	"fmt"
 	"gofly/pkg/natmap"
 	"net"
 	"strconv"
@@ -112,6 +113,22 @@ func ParseDstUdp(b []byte) *net.UDPAddr {
 		IP:   ip,
 		Port: port,
 	}
+}
+
+func ReplaceSrcIPAddr(packet []byte, newIP net.IP) error {
+	if len(packet) > IPHeaderLength {
+		copy(packet[8:24], newIP.To16()[:])
+		return nil
+	}
+	return fmt.Errorf("input packet length < %d", IPHeaderLength)
+}
+
+func ReplaceDstIPAddr(packet []byte, newIP net.IP) error {
+	if len(packet) > IPHeaderLength {
+		copy(packet[24:40], newIP.To16()[:])
+		return nil
+	}
+	return fmt.Errorf("input packet length < %d", IPHeaderLength)
 }
 
 func (x *V6Layer) ReplaceSrcAddrIcmp(b []byte, srcAddr *natmap.ICMPPair, dstAddr *natmap.ICMPPair) {
