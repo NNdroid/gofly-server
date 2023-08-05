@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"go.uber.org/zap"
 	"gofly"
 	"gofly/pkg/config"
@@ -16,6 +17,7 @@ var (
 	_flagQuiet      bool
 	_config         *config.Config
 	_flagVersion    bool
+	_flagX25519     bool
 )
 
 var (
@@ -33,16 +35,25 @@ func displayVersionInfo() {
 }
 
 func init() {
-	log.Printf("\n __    _    \n/__ _ |_|   \n\\_|(_)| |\\/ \n         /  ")
 	logger.Init()
 	flag.StringVar(&_configFilePath, "c", "config.yaml", "the path of configuration file")
 	flag.BoolVar(&_flagQuiet, "quiet", false, "quiet for log print.")
 	flag.BoolVar(&_flagVersion, "v", false, "print version info.")
+	flag.BoolVar(&_flagX25519, "x25519", false, "generate a new x25519 key.")
 	flag.Parse()
 	if _flagVersion {
 		displayVersionInfo()
 		os.Exit(0)
 	}
+	if _flagX25519 {
+		x25519, err := executeX25519()
+		if err != nil {
+			log.Fatal(err)
+		}
+		fmt.Println(x25519)
+		os.Exit(0)
+	}
+	log.Printf("\n __    _    \n/__ _ |_|   \n\\_|(_)| |\\/ \n         /  ")
 	if _flagQuiet {
 		logger.Cfg.Level.SetLevel(zap.ErrorLevel)
 	}
