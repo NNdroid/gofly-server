@@ -8,6 +8,10 @@ import (
 	"hash/fnv"
 )
 
+var (
+	enable bool
+)
+
 type XCrypto struct {
 	Key    []byte
 	Nonce  []byte
@@ -44,6 +48,10 @@ func String2Int64(s string) int64 {
 }
 
 func (x *XCrypto) Init(key string) error {
+	if key == "" {
+		enable = false
+		return nil
+	}
 	x.Load(key)
 	return x.init()
 }
@@ -62,11 +70,17 @@ func (x *XCrypto) init() error {
 }
 
 func (x *XCrypto) Encode(pl []byte) ([]byte, error) {
+	if !enable {
+		return pl, nil
+	}
 	ci := x.aesGcm.Seal(nil, x.Nonce, pl, nil)
 	return ci, nil
 }
 
 func (x *XCrypto) Decode(ci []byte) ([]byte, error) {
+	if !enable {
+		return ci, nil
+	}
 	pl, err := x.aesGcm.Open(nil, x.Nonce, ci, nil)
 	if err != nil {
 		return nil, err
