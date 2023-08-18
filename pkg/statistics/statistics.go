@@ -114,9 +114,11 @@ func (x *Statistics) EnableCronTask() {
 		defer x.mutex.Unlock()
 		for i, v := range x.ClientList {
 			if !v.Online {
-				last := len(x.ClientList)
-				x.ClientList[i] = x.ClientList[last-1]
-				x.ClientList = x.ClientList[:last-2]
+				count := len(x.ClientList) - 1
+				if count > 0 {
+					x.ClientList[i] = x.ClientList[count]
+				}
+				x.ClientList = x.ClientList[:count]
 			}
 		}
 	}, x)
