@@ -74,7 +74,7 @@ func StartServer(config *config.Config) {
 	go RunLocalHttpServer()
 	stats = &statistics.Statistics{}
 	go stats.AutoUpdateChartData()
-	go stats.EnableCronTask()
+	stats.EnableCronTask()
 	bs := basic.Server{
 		Layer:          layer,
 		Config:         config,
