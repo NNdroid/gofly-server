@@ -16,6 +16,7 @@ require (
 )
 
 require (
+	github.com/go-co-op/gocron v1.31.2
 	github.com/stretchr/testify v1.8.4
 	github.com/xtls/reality v0.0.0-20230613075828-e07c3b04b983
 	golang.org/x/crypto v0.11.0
@@ -42,6 +43,7 @@ require (
 	github.com/pelletier/go-toml/v2 v2.0.9 // indirect
 	github.com/pires/go-proxyproto v0.6.2 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
+	github.com/robfig/cron/v3 v3.0.1 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/ugorji/go/codec v1.2.11 // indirect
 	go.uber.org/atomic v1.11.0 // indirect

@@ -27,6 +27,7 @@ function goBuild() {
     $gitHash=git log --pretty=format:'%h' -n 1
     $buildTime=git log --pretty=format:'%cd' -n 1
     set CGO_ENABLED=0
+    go env -w CGO_ENABLED=0
     set GOOS=$os
     go env -w GOOS=$os
     set GOARCH=$arch

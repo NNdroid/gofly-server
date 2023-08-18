@@ -1,6 +1,9 @@
 package statistics
 
 import (
+	"github.com/go-co-op/gocron"
+	"go.uber.org/zap"
+	"gofly/pkg/logger"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -16,6 +19,8 @@ func (t Time) String() string {
 func (t Time) MarshalJSON() ([]byte, error) {
 	return []byte("\"" + t.String() + "\""), nil
 }
+
+var cron = gocron.NewScheduler(time.UTC)
 
 type ClientData struct {
 	Addr        net.Addr `json:"addr"`
@@ -102,6 +107,26 @@ func (x *Statistics) Push(y net.Addr) {
 	}
 }
 
+func (x *Statistics) EnableCronTask() {
+	//auto Statistics reset
+	_, err := cron.Every(1).Day().At("00:00").Do(func(x *Statistics) {
+		x.mutex.Lock()
+		defer x.mutex.Unlock()
+		for i, v := range x.ClientList {
+			if !v.Online {
+				last := len(x.ClientList)
+				x.ClientList[i] = x.ClientList[last-1]
+				x.ClientList = x.ClientList[:last-2]
+			}
+		}
+	}, x)
+	if err != nil {
+		logger.Logger.Error("statistics reset task start failed: ", zap.Error(err))
+		return
+	}
+	logger.Logger.Info("statistics reset task started")
+}
+
 func (x *Statistics) AutoUpdateChartData() {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
@@ -112,7 +137,7 @@ func (x *Statistics) AutoUpdateChartData() {
 			continue
 		}
 		x.mutex.Lock()
-		if x.ChartData.count < 1800 {
+		if x.ChartData.count < 600 {
 			x.ChartData.labels = append(x.ChartData.labels, time.Now().Format("15:04:05"))
 			x.ChartData.transportBytes = append(x.ChartData.transportBytes, int(currentRX-x.ChartData.previousRX))
 			x.ChartData.receiveBytes = append(x.ChartData.receiveBytes, int(currentTX-x.ChartData.previousTX))
