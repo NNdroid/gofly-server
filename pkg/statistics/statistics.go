@@ -125,6 +125,8 @@ func (x *Statistics) EnableCronTask() {
 		return
 	}
 	logger.Logger.Info("statistics reset task started")
+
+	cron.StartAsync()
 }
 
 func (x *Statistics) AutoUpdateChartData() {
