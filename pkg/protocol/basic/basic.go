@@ -10,6 +10,7 @@ import (
 	"gofly/pkg/layers/ipv6"
 	"gofly/pkg/logger"
 	"gofly/pkg/statistics"
+	"time"
 )
 
 type ServerForApi interface {
@@ -125,4 +126,8 @@ func (x *Server) ConvertSrcAddr(packet []byte) {
 			ipv6.CalcICMPCheckSum(packet)
 		}
 	}
+}
+
+func GetTimeout() time.Time {
+	return time.Now().Add(time.Second * 3)
 }

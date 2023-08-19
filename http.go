@@ -49,6 +49,15 @@ func RunLocalHttpServer() {
 			"count":     count,
 		})
 	})
+	g1.GET("/traffic/chart/daily", func(c *gin.Context) {
+		tbx, rbx, labels, count := stats.DailyChartData.GetData()
+		c.JSON(http.StatusOK, gin.H{
+			"receive":   rbx,
+			"transport": tbx,
+			"labels":    labels,
+			"count":     count,
+		})
+	})
 	g1.GET("/clients", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"data": stats.ClientList,

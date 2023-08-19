@@ -41,8 +41,52 @@ var trafficData = {
 
 const trafficChart = new Chart(ctx, trafficData);
 
+const ctx_daily = document.getElementById('traffic_chart_daily');
+var trafficData_daily = {
+    type: 'line',
+    data: {
+        labels: [],
+        datasets: [
+            {
+                label: 'download',
+                data: [],
+                borderWidth: 1
+            },
+            {
+                label: 'upload',
+                data: [],
+                borderWidth: 1
+            }
+        ]
+    },
+    options: {
+        scales: {
+            y: {
+                beginAtZero: true,
+                ticks: {
+                    callback: function(value) {
+                        return getFriendlyByteString(value)
+                    }
+                }
+            }
+        },
+        plugins: {
+            tooltip: {
+                callbacks: {
+                    label: function (context) {
+                        return getFriendlyByteString(context.parsed.y)
+                    }
+                }
+            }
+        }
+    }
+};
+
+const trafficChart_daily = new Chart(ctx_daily, trafficData_daily);
+
 updateYourInfo()
 
+setInterval(updateTrafficDailyChartsData, 1000, trafficChart_daily, trafficData_daily)
 setInterval(updateTrafficChartsData, 1000, trafficChart, trafficData)
 setInterval(updateTrafficData, 1000)
 setInterval(updateOnlineClientCount, 1000)
@@ -77,6 +121,20 @@ function updateOnlineClientCount() {
 
 function updateTrafficChartsData(chart, data) {
     fetch('/api/v1/traffic/chart')
+        .then(r => r.json())
+        .then(r => {
+            data.data.labels = r.labels
+            data.data.datasets[0].data = r.transport
+            data.data.datasets[1].data = r.receive
+            chart.update()
+        })
+        .catch(err => {
+            new $.zui.Messager(err,{}).show();
+        })
+}
+
+function updateTrafficDailyChartsData(chart, data) {
+    fetch('/api/v1/traffic/chart/daily')
         .then(r => r.json())
         .then(r => {
             data.data.labels = r.labels

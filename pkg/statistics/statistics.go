@@ -41,6 +41,16 @@ type ChartData struct {
 	count          int
 }
 
+type DailyChartData struct {
+	mutex          sync.Mutex
+	previousRX     uint64
+	previousTX     uint64
+	transportBytes []uint64
+	receiveBytes   []uint64
+	labels         []string
+	count          int
+}
+
 type Statistics struct {
 	mutex             sync.Mutex
 	OnlineClientCount int
@@ -48,6 +58,7 @@ type Statistics struct {
 	RX                uint64
 	TX                uint64
 	ChartData         ChartData
+	DailyChartData    DailyChartData
 }
 
 var keyMap = make(map[string]int)
@@ -128,6 +139,31 @@ func (x *Statistics) EnableCronTask() {
 	}
 	logger.Logger.Info("statistics reset task started")
 
+	//daily chart data
+	_, err = cron.Every(1).Day().At("23:55").Do(func() {
+		x.DailyChartData.mutex.Lock()
+		defer x.DailyChartData.mutex.Unlock()
+		var currentTX = x.TX //TX is the total received by all clients
+		var currentRX = x.RX //RX is the total number of transfers from all clients
+		if x.DailyChartData.count < 30 {
+			x.DailyChartData.transportBytes = append(x.DailyChartData.transportBytes, currentTX-x.DailyChartData.previousTX)
+			x.DailyChartData.receiveBytes = append(x.DailyChartData.receiveBytes, currentRX-x.DailyChartData.previousRX)
+			x.DailyChartData.labels = append(x.DailyChartData.labels, time.Now().Format("2006-01-02"))
+			x.DailyChartData.count++
+		} else {
+			x.DailyChartData.transportBytes = append(x.DailyChartData.transportBytes[1:], currentTX-x.DailyChartData.previousTX)
+			x.DailyChartData.receiveBytes = append(x.DailyChartData.receiveBytes[1:], currentRX-x.DailyChartData.previousRX)
+			x.DailyChartData.labels = append(x.DailyChartData.labels[1:], time.Now().Format("2006-01-02"))
+		}
+		x.DailyChartData.previousTX = currentTX
+		x.DailyChartData.previousRX = currentRX
+	})
+	if err != nil {
+		logger.Logger.Error("daily chart data start failed: ", zap.Error(err))
+		return
+	}
+	logger.Logger.Info("daily chart data task started")
+
 	cron.StartAsync()
 }
 
@@ -135,6 +171,7 @@ func (x *Statistics) AutoUpdateChartData() {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for range ticker.C {
+		//chart data
 		var currentTX = x.TX //TX is the total received by all clients
 		var currentRX = x.RX //RX is the total number of transfers from all clients
 		if currentTX == 0 && currentRX == 0 {
@@ -158,6 +195,12 @@ func (x *Statistics) AutoUpdateChartData() {
 }
 
 func (x *ChartData) GetData() ([]int, []int, []string, int) {
+	x.mutex.Lock()
+	defer x.mutex.Unlock()
+	return x.transportBytes, x.receiveBytes, x.labels, x.count
+}
+
+func (x *DailyChartData) GetData() ([]uint64, []uint64, []string, int) {
 	x.mutex.Lock()
 	defer x.mutex.Unlock()
 	return x.transportBytes, x.receiveBytes, x.labels, x.count
