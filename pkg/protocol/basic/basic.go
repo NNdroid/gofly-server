@@ -129,5 +129,5 @@ func (x *Server) ConvertSrcAddr(packet []byte) {
 }
 
 func GetTimeout() time.Time {
-	return time.Now().Add(time.Second * 3)
+	return time.Now().Add(time.Second * 9)
 }
