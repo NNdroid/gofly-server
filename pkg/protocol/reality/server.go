@@ -161,13 +161,6 @@ func (x *Server) ToClient() {
 					Length:          len(b),
 				}
 				conn := v.(net.Conn)
-				err = conn.SetWriteDeadline(basic.GetTimeout())
-				if err != nil {
-					logger.Logger.Sugar().Errorf("error, %v\n", err)
-					x.ConnectionCache.Delete(key)
-					x.closeTheClient(conn, err)
-					continue
-				}
 				ns, err := conn.Write(xproto.Merge(ph.Bytes(), b))
 				if err != nil {
 					logger.Logger.Sugar().Errorf("error, %v\n", err)
@@ -228,11 +221,6 @@ func (x *Server) ToServer(conn net.Conn) {
 	var n int
 	for basic.ContextOpened(x.CTX) {
 		total = 0
-		err = conn.SetReadDeadline(basic.GetTimeout())
-		if err != nil {
-			logger.Logger.Sugar().Errorf("error, %v\n", err)
-			break
-		}
 		n, err = conn.Read(header)
 		if err != nil {
 			logger.Logger.Sugar().Errorf("error, %v\n", err)

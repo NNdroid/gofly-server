@@ -194,12 +194,6 @@ func (x *Server) toClient() {
 				}
 				ns := len(b)
 				conn := v.(*websocket.Conn)
-				err = conn.SetWriteDeadline(basic.GetTimeout())
-				if err != nil {
-					logger.Logger.Error("write data error", zap.Error(err))
-					x.ConnectionCache.Delete(key)
-					continue
-				}
 				err = conn.WriteMessage(websocket.BinaryMessage, b)
 				if err != nil {
 					logger.Logger.Error("write data error", zap.Error(err))
