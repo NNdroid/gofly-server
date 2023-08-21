@@ -13,6 +13,7 @@ import (
 	"gofly/pkg/logger"
 	"gofly/pkg/protocol/basic"
 	"gofly/pkg/utils"
+	"gofly/pkg/x/xutils"
 	"log"
 	"net/http"
 	"os"
@@ -76,8 +77,12 @@ func (x *Server) onWebsocket(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("forbidden"))
 		return
 	}
+	responseHeader := http.Header{}
+	if str := r.Header.Get("Sec-WebSocket-Key"); str != "" {
+		responseHeader.Set("Sec-WebSocket-Key", xutils.RandomString(len(str)))
+	}
 	upgrade := x.newUpgrade()
-	conn, err := upgrade.Upgrade(w, r, nil)
+	conn, err := upgrade.Upgrade(w, r, responseHeader)
 	if err != nil {
 		logger.Logger.Sugar().Errorf("upgrade error: %v", zap.Error(err))
 		w.WriteHeader(http.StatusForbidden)
