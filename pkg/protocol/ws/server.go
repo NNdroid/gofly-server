@@ -78,8 +78,8 @@ func (x *Server) onWebsocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	responseHeader := http.Header{}
-	if str := r.Header.Get("X-Request-ID"); str != "" {
-		responseHeader.Set("X-Request-ID", xutils.RandomString(len(str)))
+	if str := r.Header.Get("GoFly-Request-ID"); str != "" {
+		responseHeader.Set("GoFly-Request-ID", xutils.RandomString(len(str)))
 	}
 	upgrade := x.newUpgrade()
 	conn, err := upgrade.Upgrade(w, r, responseHeader)
