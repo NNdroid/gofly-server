@@ -34,6 +34,8 @@ type Server struct {
 
 func (x *Server) newUpgrade() *websocket.Upgrader {
 	u := websocket.NewUpgrader()
+	u.KeepaliveTime = time.Second * 25
+	u.HandshakeTimeout = time.Second * time.Duration(x.Config.VTunSettings.Timeout)
 	u.CheckOrigin = func(r *http.Request) bool { return true }
 	u.SetPingHandler(func(c *websocket.Conn, s string) {
 		logger.Logger.Sugar().Debugf("received ping message <%v> from %s\n", s, c.Conn.RemoteAddr().String())
@@ -64,7 +66,6 @@ func (x *Server) newUpgrade() *websocket.Upgrader {
 			}
 		}
 	})
-
 	u.OnClose(func(c *websocket.Conn, err error) {
 		x.Statistics.Remove(c.RemoteAddr())
 		logger.Logger.Sugar().Debugf("closed: %s -> %v", c.RemoteAddr().String(), zap.Error(err))
