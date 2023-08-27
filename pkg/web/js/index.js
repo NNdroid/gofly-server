@@ -65,7 +65,7 @@ var trafficData_daily = {
                 beginAtZero: true,
                 ticks: {
                     callback: function(value) {
-                        return getFriendlyByteString(value)
+                        return getFriendlyByteStringB(value)
                     }
                 }
             }
@@ -74,7 +74,7 @@ var trafficData_daily = {
             tooltip: {
                 callbacks: {
                     label: function (context) {
-                        return getFriendlyByteString(context.parsed.y)
+                        return getFriendlyByteStringB(context.parsed.y)
                     }
                 }
             }
@@ -84,9 +84,53 @@ var trafficData_daily = {
 
 const trafficChart_daily = new Chart(ctx_daily, trafficData_daily);
 
+const ctx_per_hour = document.getElementById('traffic_chart_per_hour');
+var trafficData_per_hour = {
+    type: 'line',
+    data: {
+        labels: [],
+        datasets: [
+            {
+                label: 'download',
+                data: [],
+                borderWidth: 1
+            },
+            {
+                label: 'upload',
+                data: [],
+                borderWidth: 1
+            }
+        ]
+    },
+    options: {
+        scales: {
+            y: {
+                beginAtZero: true,
+                ticks: {
+                    callback: function(value) {
+                        return getFriendlyByteStringB(value)
+                    }
+                }
+            }
+        },
+        plugins: {
+            tooltip: {
+                callbacks: {
+                    label: function (context) {
+                        return getFriendlyByteStringB(context.parsed.y)
+                    }
+                }
+            }
+        }
+    }
+};
+
+const trafficChart_per_hour = new Chart(ctx_per_hour, trafficData_per_hour);
+
 updateYourInfo()
 
 setInterval(updateTrafficDailyChartsData, 1000, trafficChart_daily, trafficData_daily)
+setInterval(updateTrafficPerHourChartsData, 1000, trafficChart_per_hour, trafficData_per_hour)
 setInterval(updateTrafficChartsData, 1000, trafficChart, trafficData)
 setInterval(updateTrafficData, 1000)
 setInterval(updateOnlineClientCount, 1000)
@@ -135,6 +179,21 @@ function updateTrafficChartsData(chart, data) {
 
 function updateTrafficDailyChartsData(chart, data) {
     fetch('/api/v1/traffic/chart/daily')
+        .then(r => r.json())
+        .then(r => {
+            data.data.labels = r.labels
+            data.data.datasets[0].data = r.transport
+            data.data.datasets[1].data = r.receive
+            chart.update()
+        })
+        .catch(err => {
+            new $.zui.Messager(err,{}).show();
+        })
+}
+
+
+function updateTrafficPerHourChartsData(chart, data) {
+    fetch('/api/v1/traffic/chart/per_hour')
         .then(r => r.json())
         .then(r => {
             data.data.labels = r.labels

@@ -49,6 +49,16 @@ type DailyChartData struct {
 	count          int
 }
 
+type PerHourChartData struct {
+	mutex          sync.Mutex
+	previousRX     uint64
+	previousTX     uint64
+	transportBytes []uint64
+	receiveBytes   []uint64
+	labels         []string
+	count          int
+}
+
 type Statistics struct {
 	mutex             sync.Mutex
 	OnlineClientCount int
@@ -57,6 +67,7 @@ type Statistics struct {
 	TX                uint64
 	ChartData         ChartData
 	DailyChartData    DailyChartData
+	PerHourChartData  PerHourChartData
 }
 
 var keyMap = make(map[string]int)
@@ -150,6 +161,12 @@ func (x *ChartData) GetData() ([]int, []int, []string, int) {
 }
 
 func (x *DailyChartData) GetData() ([]uint64, []uint64, []string, int) {
+	x.mutex.Lock()
+	defer x.mutex.Unlock()
+	return x.transportBytes, x.receiveBytes, x.labels, x.count
+}
+
+func (x *PerHourChartData) GetData() ([]uint64, []uint64, []string, int) {
 	x.mutex.Lock()
 	defer x.mutex.Unlock()
 	return x.transportBytes, x.receiveBytes, x.labels, x.count
