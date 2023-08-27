@@ -32,6 +32,9 @@ func FindAIPv6Address(ips []string) string {
 }
 
 func GetSrcKey(b []byte) string {
+	if len(b) == 0 {
+		return ""
+	}
 	version := b[0] >> 4
 	if version == 4 {
 		if len(b) < 20 {
@@ -48,6 +51,9 @@ func GetSrcKey(b []byte) string {
 }
 
 func GetDstKey(b []byte) string {
+	if len(b) == 0 {
+		return ""
+	}
 	version := b[0] >> 4
 	if version == 4 {
 		if len(b) < 20 {
