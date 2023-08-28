@@ -10,8 +10,8 @@ import (
 	"strconv"
 )
 
-func RunLocalHttpServer() {
-	listener, err := tNet.ListenTCP(&net.TCPAddr{Port: 80})
+func (u *AppContainer) RunLocalHttpServer() {
+	listener, err := u.TunNet.ListenTCP(&net.TCPAddr{Port: 80})
 	if err != nil {
 		log.Panicln(err)
 	}
@@ -32,16 +32,16 @@ func RunLocalHttpServer() {
 		})
 	})
 	g1.GET("/online/count", func(c *gin.Context) {
-		c.String(http.StatusOK, strconv.Itoa(stats.OnlineClientCount))
+		c.String(http.StatusOK, strconv.Itoa(u.Stats.OnlineClientCount))
 	})
 	g1.GET("/traffic", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
-			"rx": stats.RX,
-			"tx": stats.TX,
+			"rx": u.Stats.RX,
+			"tx": u.Stats.TX,
 		})
 	})
 	g1.GET("/traffic/chart", func(c *gin.Context) {
-		tbx, rbx, labels, count := stats.ChartData.GetData()
+		tbx, rbx, labels, count := u.Stats.ChartData.GetData()
 		c.JSON(http.StatusOK, gin.H{
 			"receive":   rbx,
 			"transport": tbx,
@@ -50,7 +50,7 @@ func RunLocalHttpServer() {
 		})
 	})
 	g1.GET("/traffic/chart/daily", func(c *gin.Context) {
-		tbx, rbx, labels, count := stats.DailyChartData.GetData()
+		tbx, rbx, labels, count := u.Stats.DailyChartData.GetData()
 		c.JSON(http.StatusOK, gin.H{
 			"receive":   rbx,
 			"transport": tbx,
@@ -59,7 +59,7 @@ func RunLocalHttpServer() {
 		})
 	})
 	g1.GET("/traffic/chart/per_hour", func(c *gin.Context) {
-		tbx, rbx, labels, count := stats.PerHourChartData.GetData()
+		tbx, rbx, labels, count := u.Stats.PerHourChartData.GetData()
 		c.JSON(http.StatusOK, gin.H{
 			"receive":   rbx,
 			"transport": tbx,
@@ -69,8 +69,22 @@ func RunLocalHttpServer() {
 	})
 	g1.GET("/clients", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
-			"data": stats.ClientList,
+			"data": u.Stats.ClientList,
 		})
+	})
+	g1.GET("/reconnect", func(c *gin.Context) {
+		var err error
+		err = u.Device.Down()
+		if err != nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"result": false, "error": err.Error()})
+			return
+		}
+		err = u.Device.Up()
+		if err != nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"result": false, "error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"result": true})
 	})
 	r.GET("/", func(c *gin.Context) {
 		c.String(http.StatusOK, ":)   this is vpn gateway!\ndashboard at /dashboard\ncopyright follow 2023")
@@ -81,10 +95,10 @@ func RunLocalHttpServer() {
 	}
 }
 
-func RunHttpClient() {
+func (u *AppContainer) RunHttpClient() {
 	client := http.Client{
 		Transport: &http.Transport{
-			DialContext: tNet.DialContext,
+			DialContext: u.TunNet.DialContext,
 		},
 	}
 	resp, err := client.Get("http://172.16.222.1/")

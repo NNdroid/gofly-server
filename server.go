@@ -21,15 +21,19 @@ import (
 	"log"
 )
 
-var _ctx context.Context
-var cancel context.CancelFunc
-var ti tun2.Device
-var tNet *ct.Net
-var layer *layers.Layer
-var stats *statistics.Statistics
+type AppContainer struct {
+	CTX       context.Context
+	CANCEL    context.CancelFunc
+	TunDevice tun2.Device
+	TunNet    *ct.Net
+	Layer     *layers.Layer
+	Stats     *statistics.Statistics
+	Device    *device.Device
+}
 
 func StartServer(config *config.Config) {
-	_ctx, cancel = context.WithCancel(context.Background())
+	app := &AppContainer{}
+	app.CTX, app.CANCEL = context.WithCancel(context.Background())
 	ipv4Addr := utils.FindAIPv4Address(config.WireGuardSettings.Address)
 	if ipv4Addr == "" {
 		logger.Logger.Fatal("can not find a ipv4 address from configuration.")
@@ -40,14 +44,14 @@ func StartServer(config *config.Config) {
 		logger.Logger.Fatal("can not find a ipv6 address from configuration.")
 		return
 	}
-	layer = &layers.Layer{
+	app.Layer = &layers.Layer{
 		V4Layer: ipv4.New(ipv4Addr),
 		V6Layer: ipv6.New(ipv6Addr),
 	}
-	layer.LoadAddress(config.WireGuardSettings.Address)
-	ct.Init(_ctx)
+	app.Layer.LoadAddress(config.WireGuardSettings.Address)
+	ct.Init(app.CTX)
 	var err error
-	ti, tNet, err = ct.CreateNetTUN(
+	app.TunDevice, app.TunNet, err = ct.CreateNetTUN(
 		utils.ParseAddr(config.WireGuardSettings.Address),
 		utils.ParseAddr(config.WireGuardSettings.DNS),
 		config.WireGuardSettings.MTU,
@@ -59,7 +63,7 @@ func StartServer(config *config.Config) {
 	if config.VTunSettings.Verbose {
 		logLevel = device.LogLevelVerbose
 	}
-	dev := device.NewDevice(ti, conn.NewDefaultBind(), device.NewLogger(logLevel, ""))
+	dev := device.NewDevice(app.TunDevice, conn.NewDefaultBind(), device.NewLogger(logLevel, ""))
 	ClientConfig := createIPCRequest(config)
 	err = dev.IpcSet(ClientConfig)
 	if err != nil {
@@ -69,20 +73,20 @@ func StartServer(config *config.Config) {
 	if err != nil {
 		log.Panic(err)
 	}
-	go ReadTunSync(config)
-	//go RunHttpClient()
-	go RunLocalHttpServer()
-	stats = &statistics.Statistics{}
-	go stats.AutoUpdateChartData()
-	stats.EnableCronTask()
+	go app.ReadTunSync(config)
+	//go app.RunHttpClient()
+	go app.RunLocalHttpServer()
+	app.Stats = &statistics.Statistics{}
+	go app.Stats.AutoUpdateChartData()
+	app.Stats.EnableCronTask()
 	bs := basic.Server{
-		Layer:          layer,
+		Layer:          app.Layer,
 		Config:         config,
-		ReadFunc:       ReadFromWireGuard,
-		WriteFunc:      WriteToWireGuard,
-		WriteToTunFunc: WriteToTun,
-		CTX:            _ctx,
-		Statistics:     stats,
+		ReadFunc:       app.ReadFromWireGuard,
+		WriteFunc:      app.WriteToWireGuard,
+		WriteToTunFunc: app.WriteToTun,
+		CTX:            app.CTX,
+		Statistics:     app.Stats,
 	}
 	var server basic.ServerForApi
 	switch config.VTunSettings.Protocol {
@@ -113,16 +117,16 @@ func StartServer(config *config.Config) {
 	server.StartServerForApi()
 }
 
-func ReadTunSync(config *config.Config) {
+func (u *AppContainer) ReadTunSync(config *config.Config) {
 	buffer := make([]byte, config.VTunSettings.BufferSize)
-	for contextOpened(_ctx) {
-		n, err := ReadFromTun(buffer)
+	for contextOpened(u.CTX) {
+		n, err := u.ReadFromTun(buffer)
 		if err != nil {
 			logger.Logger.Sugar().Errorf("ReadFromTun error %v\n", zap.Error(err))
 		}
 		b := make([]byte, n)
 		copy(b, buffer[:n])
-		tNet.WaitRecvCh.In <- b
+		u.TunNet.WaitRecvCh.In <- b
 	}
 }
 
@@ -135,27 +139,27 @@ func contextOpened(_ctx context.Context) bool {
 	}
 }
 
-func ReadFromWireGuard(bts []byte) (int, error) {
-	a := <-tNet.WaitRecvCh.Out
+func (u *AppContainer) ReadFromWireGuard(bts []byte) (int, error) {
+	a := <-u.TunNet.WaitRecvCh.Out
 	n := len(a)
 	copy(bts[:n], a)
 	return n, nil
 }
 
-func WriteToWireGuard(bts []byte) int {
+func (u *AppContainer) WriteToWireGuard(bts []byte) int {
 	n := len(bts)
-	tNet.WaitSendCh.In <- bts
+	u.TunNet.WaitSendCh.In <- bts
 	return n
 }
 
-func ReadFromTun(buf []byte) (int, error) {
-	return ti.(*ct.NetTun).ReadFromTun(buf, 0)
+func (u *AppContainer) ReadFromTun(buf []byte) (int, error) {
+	return u.TunDevice.(*ct.NetTun).ReadFromTun(buf, 0)
 }
 
-func WriteToTun(buf []byte) (int, error) {
-	return ti.(*ct.NetTun).WriteToTun(buf, 0)
+func (u *AppContainer) WriteToTun(buf []byte) (int, error) {
+	return u.TunDevice.(*ct.NetTun).WriteToTun(buf, 0)
 }
 
-func Close() {
-	cancel()
+func (u *AppContainer) Close() {
+	u.CANCEL()
 }
