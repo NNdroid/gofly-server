@@ -3,6 +3,7 @@ package xproto
 import (
 	"bytes"
 	"crypto/md5"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net"
@@ -165,6 +166,10 @@ func (u *AuthKey) Equals(another *AuthKey) bool {
 		return false
 	}
 	return bytes.Equal(u.Bytes(), another.Bytes())
+}
+
+func (u *AuthKey) String() string {
+	return hex.EncodeToString(u.Bytes())
 }
 
 // ParseBytes converts a AuthKey in byte form to object.

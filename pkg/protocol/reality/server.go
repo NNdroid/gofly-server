@@ -192,7 +192,7 @@ func (x *Server) HandshakeFromClient(conn net.Conn, authKey *xproto.AuthKey) err
 		return fmt.Errorf("hs == nil")
 	}
 	if !hs.Key.Equals(authKey) {
-		return fmt.Errorf("authentication failed")
+		return fmt.Errorf("authentication failed, expected: <%s>, actual: <%s>", authKey, hs.Key)
 	}
 	x.ConnectionCache.Set(hs.CIDRv4.String(), conn, 15*time.Minute)
 	x.ConnectionCache.Set(hs.CIDRv6.String(), conn, 15*time.Minute)
@@ -237,7 +237,7 @@ func (x *Server) ToServer(conn net.Conn) {
 			break
 		}
 		if !ph.Key.Equals(authKey) {
-			logger.Logger.Sugar().Errorln("authentication failed")
+			logger.Logger.Sugar().Errorf("authentication failed, expected: <%s>, actual: <%s>\n", authKey, ph.Key)
 			break
 		}
 		length, err = splitRead(conn, ph.Length, packet[:ph.Length])
