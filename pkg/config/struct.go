@@ -19,15 +19,16 @@ type Config struct {
 }
 
 type VTunConfig struct {
-	LocalAddr  string `yaml:"local_addr"`
-	Key        string `yaml:"key"`
-	Protocol   string `yaml:"protocol"`
-	Obfs       bool   `yaml:"obfs"`
-	Compress   bool   `yaml:"compress"`
-	MTU        int    `yaml:"mtu"`
-	Timeout    int    `yaml:"timeout"` //Unit second
-	BufferSize int    `yaml:"buffer_size"`
-	Verbose    bool   `yaml:"verbose"`
+	LocalAddr       string `yaml:"local_addr"`
+	Key             string `yaml:"key"`
+	Protocol        string `yaml:"protocol"`
+	Obfs            bool   `yaml:"obfs"`
+	Compress        bool   `yaml:"compress"`
+	MTU             int    `yaml:"mtu"`
+	Timeout         int    `yaml:"timeout"` //Unit second
+	BufferSize      int    `yaml:"buffer_size"`
+	Verbose         bool   `yaml:"verbose"`
+	ClientIsolation bool   `yaml:"client_isolation"`
 }
 
 type WebSocketConfig struct {

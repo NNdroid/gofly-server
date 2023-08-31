@@ -266,10 +266,23 @@ func (x *Server) ToServer(conn net.Conn) {
 		if x.Config.VTunSettings.Obfs {
 			b = cipher.XOR(b)
 		}
-		x.ConvertSrcAddr(b)
-		x.WriteFunc(b)
-		x.Statistics.IncrReceivedBytes(total)
-		x.Statistics.IncrClientTransportBytes(conn.RemoteAddr(), total)
+		dstKey := utils.GetDstKey(b)
+		if dstKey != "" {
+			if v, ok := x.ConnectionCache.Get(dstKey); ok && !x.Config.VTunSettings.ClientIsolation {
+				dstConn := v.(net.Conn)
+				_, err = dstConn.Write(b)
+				if err != nil {
+					logger.Logger.Sugar().Errorf("error, %v\n", err)
+					x.closeTheClient(dstConn, err)
+					continue
+				}
+			} else {
+				x.ConvertSrcAddr(b)
+				x.WriteFunc(b)
+				x.Statistics.IncrReceivedBytes(total)
+				x.Statistics.IncrClientTransportBytes(conn.RemoteAddr(), total)
+			}
+		}
 	}
 }
 
