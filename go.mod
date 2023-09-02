@@ -4,7 +4,6 @@ go 1.20
 
 require (
 	github.com/gin-gonic/gin v1.9.1
-	github.com/golang/snappy v0.0.4
 	github.com/lesismal/llib v1.1.12
 	github.com/lesismal/nbio v1.3.17
 	github.com/patrickmn/go-cache v2.1.0+incompatible
@@ -17,6 +16,7 @@ require (
 
 require (
 	github.com/go-co-op/gocron v1.31.2
+	github.com/klauspost/compress v1.16.7
 	github.com/stretchr/testify v1.8.4
 	github.com/xtls/reality v0.0.0-20230613075828-e07c3b04b983
 	golang.org/x/crypto v0.11.0

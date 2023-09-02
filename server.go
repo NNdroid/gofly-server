@@ -113,6 +113,8 @@ func StartServer(config *config.Config) {
 	default:
 		log.Panic(errors.New("unsupported protocol"))
 	}
+	//init server
+	server.Init()
 	//start server
 	server.StartServerForApi()
 }

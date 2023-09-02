@@ -10,7 +10,6 @@ import (
 	"github.com/lesismal/nbio/nbhttp/websocket"
 	"github.com/patrickmn/go-cache"
 	"go.uber.org/zap"
-	"gofly/pkg/cipher"
 	"gofly/pkg/logger"
 	"gofly/pkg/protocol/basic"
 	"gofly/pkg/utils"
@@ -20,8 +19,6 @@ import (
 	"os"
 	"os/signal"
 	"time"
-
-	"github.com/golang/snappy"
 
 	"github.com/lesismal/llib/std/crypto/tls"
 )
@@ -49,21 +46,21 @@ func (x *Server) newUpgrade() *websocket.Upgrader {
 		logger.Logger.Sugar().Debugf("received pong message <%v> from %s\n", s, c.Conn.RemoteAddr().String())
 	})
 	u.OnMessage(func(c *websocket.Conn, messageType websocket.MessageType, data []byte) {
+		var err error
 		if messageType == websocket.BinaryMessage {
 			n := len(data)
 			x.Statistics.IncrReceivedBytes(n)
-			if x.Config.VTunSettings.Compress {
-				data, _ = snappy.Decode(nil, data)
-			}
-			if x.Config.VTunSettings.Obfs {
-				data = cipher.XOR(data)
+			data, err = x.BasicDecode(data)
+			if err != nil {
+				logger.Logger.Sugar().Errorf("decode error: %v", zap.Error(err))
+				return
 			}
 			if key := utils.GetSrcKey(data); key != "" {
 				x.ConnectionCache.Set(key, c, 24*time.Hour)
 				dstKey := utils.GetDstKey(data)
 				if dstKey != "" {
 					if dstConn, ok := x.ConnectionCache.Get(dstKey); ok && !x.Config.VTunSettings.ClientIsolation {
-						err := dstConn.(*websocket.Conn).WriteMessage(websocket.BinaryMessage, data)
+						err = dstConn.(*websocket.Conn).WriteMessage(websocket.BinaryMessage, data)
 						if err != nil {
 							logger.Logger.Sugar().Errorf("write message error: %v", zap.Error(err))
 							return
@@ -123,7 +120,6 @@ func (x *Server) StartServerForApi() {
 		gin.SetMode(gin.ReleaseMode)
 	}
 	x.ConnectionCache = cache.New(15*time.Minute, 24*time.Hour)
-	cipher.SetKey(x.Config.VTunSettings.Key)
 	// server -> client
 	go x.toClient()
 	// client -> server
@@ -213,14 +209,14 @@ func (x *Server) toClient() {
 		x.ConvertDstAddr(b)
 		if key := utils.GetDstKey(b); key != "" {
 			if v, ok := x.ConnectionCache.Get(key); ok {
-				if x.Config.VTunSettings.Obfs {
-					b = cipher.XOR(b)
-				}
-				if x.Config.VTunSettings.Compress {
-					b = snappy.Encode(nil, b)
+				conn := v.(*websocket.Conn)
+				b, err = x.BasicEncode(b)
+				if err != nil {
+					logger.Logger.Error("encode error", zap.Error(err))
+					x.ConnectionCache.Delete(key)
+					continue
 				}
 				ns := len(b)
-				conn := v.(*websocket.Conn)
 				err = conn.WriteMessage(websocket.BinaryMessage, b)
 				if err != nil {
 					logger.Logger.Error("write data error", zap.Error(err))
